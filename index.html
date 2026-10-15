@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Denise — Live Voice &amp; Vision</title>
+  <style>
+    :root { color-scheme: light; --ink: #172033; --muted: #64748b; --line: #e2e8f0; --accent: #4f46e5; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: var(--ink); background: radial-gradient(circle at top, #eef2ff 0, #f8fafc 50%, #edf2f7 100%);
+    }
+    .app { width: min(720px, 100%); background: white; border: 1px solid #e8edf4; border-radius: 24px; box-shadow: 0 24px 80px #17203314; overflow: hidden; }
+    header { padding: 26px 28px 20px; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 800; }
+    h1 { margin: 7px 0 5px; font-size: clamp(23px, 4vw, 30px); letter-spacing: -.04em; }
+    .subtitle { color: var(--muted); margin: 0; font-size: 14px; line-height: 1.5; }
+    .status-row { display: flex; align-items: center; gap: 9px; margin-top: 17px; color: var(--muted); font-size: 13px; }
+    .dot { width: 9px; height: 9px; border-radius: 100%; background: #94a3b8; flex: 0 0 auto; }
+    .dot.live { background: #22c55e; box-shadow: 0 0 0 4px #22c55e1f; }
+    .dot.error { background: #ef4444; }
+    .chat { height: min(48vh, 430px); min-height: 260px; overflow-y: auto; padding: 22px 24px; background: #fbfcfe; }
+    .empty { height: 100%; display: grid; place-content: center; text-align: center; color: #94a3b8; gap: 9px; }
+    .empty .mic { font-size: 35px; }
+    .message { display: flex; flex-direction: column; gap: 5px; max-width: 85%; margin: 0 0 17px; }
+    .message.you { margin-left: auto; align-items: flex-end; }
+    .speaker { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: #64748b; }
+    .bubble { padding: 11px 14px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: 14px; background: #eef2f7; }
+    .you .bubble { background: var(--accent); color: white; border-bottom-right-radius: 5px; }
+    .gemini .bubble { background: #f1f5f9; border-bottom-left-radius: 5px; }
+    .controls { padding: 19px 24px 24px; border-top: 1px solid var(--line); }
+    .buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+    button { border: 0; border-radius: 12px; padding: 12px 17px; font-size: 14px; font-weight: 750; cursor: pointer; transition: transform .12s ease, opacity .12s ease; }
+    button:hover:not(:disabled) { transform: translateY(-1px); }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    .primary { color: white; background: var(--accent); }
+    .danger { background: #fee2e2; color: #991b1b; }
+    .secondary { background: #eef2f7; color: #334155; }
+    .text-form { display: flex; gap: 9px; margin-top: 15px; }
+    input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font: inherit; outline: none; }
+    input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px #818cf81f; }
+    .hint { text-align: center; font-size: 11px; color: #94a3b8; margin: 13px 0 0; line-height: 1.5; }
+    .visual-panel { padding: 18px 24px 20px; border-top: 1px solid var(--line); background: #fff; }
+    .visual-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 11px; }
+    .visual-title { font-size: 14px; font-weight: 800; }
+    .visual-description { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+    .privacy-indicator { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; border-radius: 999px; background: #f1f5f9; color: #475569; padding: 7px 10px; font-size: 11px; font-weight: 800; }
+    .privacy-indicator::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+    .privacy-indicator.active { color: #166534; background: #dcfce7; }
+    .privacy-indicator.active::before { background: #22c55e; box-shadow: 0 0 0 3px #22c55e22; }
+    .visual-preview { position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; max-height: 380px; min-height: 180px; overflow: hidden; border-radius: 15px; background: #0f172a; }
+    #visual-video { display: none; width: 100%; height: 100%; object-fit: contain; background: #0f172a; }
+    .visual-placeholder { display: grid; place-items: center; gap: 8px; padding: 22px; color: #cbd5e1; text-align: center; }
+    .visual-placeholder .visual-icon { font-size: 32px; }
+    .visual-placeholder strong { color: #f8fafc; font-size: 14px; }
+    .visual-placeholder span { max-width: 380px; font-size: 12px; line-height: 1.5; }
+    .visual-live-badge { position: absolute; top: 12px; left: 12px; padding: 6px 9px; border-radius: 7px; color: #fff; background: #dc2626; font-size: 10px; font-weight: 850; letter-spacing: .08em; box-shadow: 0 2px 10px #0003; }
+    .visual-buttons { margin-top: 12px; }
+    .privacy-note { margin: 11px 0 0; color: var(--muted); text-align: center; font-size: 11px; line-height: 1.5; }
+    @media (max-width: 520px) { body { padding: 10px; } .app { border-radius: 18px; } header { padding: 22px 19px 17px; } .chat { padding: 18px 15px; } .controls { padding: 16px; } .visual-panel { padding: 16px; } .visual-heading { align-items: flex-start; flex-direction: column; } .visual-preview { min-height: 155px; } .message { max-width: 94%; } button { padding: 11px 13px; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div class="eyebrow">Real-time AI · Voice + Vision</div>
+      <h1>Denise — Live Voice &amp; Vision</h1>
+      <p class="subtitle">Talk naturally, type a message, or share your camera or screen for visual questions.</p>
+      <div class="status-row"><span id="status-dot" class="dot"></span><span id="status" role="status" aria-live="polite">Disconnected — connect to begin.</span></div>
+    </header>
+
+    <section id="chat" class="chat" aria-label="Conversation">
+      <div id="empty-state" class="empty"><div class="mic">🎙️</div><strong>Your conversation starts here</strong><span>Connect, then say hello.</span></div>
+    </section>
+
+    <section class="visual-panel" aria-label="Camera and screen share">
+      <div class="visual-heading">
+        <div>
+          <div class="visual-title">👁️ Denise's visual awareness</div>
+          <div class="visual-description">Share your camera or screen so Denise can answer questions about what is visible.</div>
+        </div>
+        <span id="visual-indicator" class="privacy-indicator" role="status" aria-live="polite">Visuals off</span>
+      </div>
+      <div class="visual-preview">
+        <video id="visual-video" autoplay muted playsinline aria-label="Local camera or screen-share preview"></video>
+        <div id="visual-placeholder" class="visual-placeholder">
+          <div class="visual-icon">📷</div>
+          <strong>Camera and screen share are off</strong>
+          <span>Choose Start camera or Share screen. Nothing is sent until you enable one of these controls.</span>
+        </div>
+        <span id="visual-live-badge" class="visual-live-badge" hidden>LIVE VISUAL INPUT</span>
+      </div>
+      <div class="buttons visual-buttons">
+        <button id="camera-btn" class="secondary" disabled>Start camera</button>
+        <button id="screen-btn" class="secondary" disabled>Share screen</button>
+        <button id="stop-visuals-btn" class="danger" disabled>Stop visuals</button>
+      </div>
+      <p class="privacy-note">While active, a compressed image is sent to Gemini about once every 1.1 seconds. Camera and screen sharing are off until you start them, and you can stop them at any time. This app does not save frames to local files.</p>
+    </section>
+
+    <section class="controls">
+      <div class="buttons">
+        <button id="start-btn" class="primary">Connect &amp; Talk</button>
+        <button id="stop-btn" class="danger" disabled>Disconnect</button>
+        <button id="clear-btn" class="secondary">Clear chat</button>
+      </div>
+      <form id="text-form" class="text-form">
+        <input id="text-input" type="text" placeholder="Type a message…" autocomplete="off" aria-label="Type a message" disabled>
+        <button id="send-btn" class="secondary" type="submit" disabled>Send</button>
+      </form>
+      <p class="hint">Your microphone is processed in this browser and streamed to your local Python backend. Keep the terminal open while chatting.</p>
+    </section>
+  </main>
+
+<script>
+(() => {
+  'use strict';
+  const WS_URL = 'ws://127.0.0.1:8765';
+  const INPUT_RATE = 16000;
+  const OUTPUT_RATE = 24000;
+
+  const startBtn = document.getElementById('start-btn');
+  const stopBtn = document.getElementById('stop-btn');
+  const clearBtn = document.getElementById('clear-btn');
+  const statusText = document.getElementById('status');
+  const statusDot = document.getElementById('status-dot');
+  const chat = document.getElementById('chat');
+  const emptyState = document.getElementById('empty-state');
+  const textForm = document.getElementById('text-form');
+  const textInput = document.getElementById('text-input');
+  const sendBtn = document.getElementById('send-btn');
+  const cameraBtn = document.getElementById('camera-btn');
+  const screenBtn = document.getElementById('screen-btn');
+  const stopVisualsBtn = document.getElementById('stop-visuals-btn');
+  const visualVideo = document.getElementById('visual-video');
+  const visualPlaceholder = document.getElementById('visual-placeholder');
+  const visualIndicator = document.getElementById('visual-indicator');
+  const visualLiveBadge = document.getElementById('visual-live-badge');
+
+  let ws = null;
+  let micStream = null;
+  let micAudioContext = null;
+  let playbackAudioContext = null;
+  let processor = null;
+  let muteGain = null;
+  let activeSources = new Set();
+  let nextPlaybackTime = 0;
+  let isConnecting = false;
+  let userRequestedDisconnect = false;
+  let lastError = '';
+  let visualStream = null;
+  let visualMode = null;
+  let visualTimer = null;
+  let frameCaptureInProgress = false;
+  const visualCanvas = document.createElement('canvas');
+  const visualContext = visualCanvas.getContext('2d', { alpha: false });
+
+  function setStatus(message, kind = 'normal') {
+    statusText.textContent = message;
+    statusDot.className = 'dot' + (kind === 'live' ? ' live' : kind === 'error' ? ' error' : '');
+  }
+
+  function addMessage(speaker, text) {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return;
+    if (emptyState) emptyState.remove();
+    const item = document.createElement('div');
+    item.className = 'message ' + (speaker === 'you' ? 'you' : 'gemini');
+    const label = document.createElement('div');
+    label.className = 'speaker';
+    label.textContent = speaker === 'you' ? 'You' : 'Denise';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = cleanText;
+    item.append(label, bubble);
+    chat.appendChild(item);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function bytesToBase64(bytes) {
+    let binary = '';
+    const stride = 0x8000;
+    for (let i = 0; i < bytes.length; i += stride) {
+      binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + stride, bytes.length)));
+    }
+    return btoa(binary);
+  }
+
+  function base64ToBytes(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  // Linear resampling is important: an AudioContext may capture at 44.1/48 kHz
+  // even when a 16 kHz context was requested. Gemini input is labelled 16 kHz.
+  function resampleFloat32(input, sourceRate, targetRate) {
+    if (sourceRate === targetRate) return input;
+    const outputLength = Math.max(1, Math.round(input.length * targetRate / sourceRate));
+    const output = new Float32Array(outputLength);
+    const ratio = sourceRate / targetRate;
+    for (let i = 0; i < outputLength; i++) {
+      const position = i * ratio;
+      const left = Math.min(Math.floor(position), input.length - 1);
+      const right = Math.min(left + 1, input.length - 1);
+      const fraction = position - left;
+      output[i] = input[left] * (1 - fraction) + input[right] * fraction;
+    }
+    return output;
+  }
+
+  function floatToPcm16(samples) {
+    const buffer = new ArrayBuffer(samples.length * 2);
+    const view = new DataView(buffer);
+    for (let i = 0; i < samples.length; i++) {
+      const sample = Math.max(-1, Math.min(1, samples[i]));
+      const pcm = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(i * 2, pcm, true); // little-endian PCM16
+    }
+    return new Uint8Array(buffer);
+  }
+
+  function stopPlayback() {
+    for (const source of activeSources) {
+      try { source.stop(); } catch (_) { /* Already stopped. */ }
+    }
+    activeSources.clear();
+    nextPlaybackTime = playbackAudioContext ? playbackAudioContext.currentTime : 0;
+  }
+
+  function playOutputChunk(base64Audio) {
+    if (!playbackAudioContext || playbackAudioContext.state === 'closed') return;
+    const bytes = base64ToBytes(base64Audio);
+    const sampleCount = Math.floor(bytes.length / 2);
+    if (!sampleCount) return;
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const samples = new Float32Array(sampleCount);
+    for (let i = 0; i < sampleCount; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+
+    const buffer = playbackAudioContext.createBuffer(1, sampleCount, OUTPUT_RATE);
+    buffer.getChannelData(0).set(samples);
+    const source = playbackAudioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(playbackAudioContext.destination);
+
+    // Schedule chunks back-to-back to avoid gaps caused by waiting for onended.
+    const startAt = Math.max(nextPlaybackTime, playbackAudioContext.currentTime + 0.025);
+    source.start(startAt);
+    nextPlaybackTime = startAt + buffer.duration;
+    activeSources.add(source);
+    source.onended = () => activeSources.delete(source);
+  }
+
+  function sendJson(payload) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+  }
+
+  async function startMicrophone() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Microphone access is unavailable. Open this page at http://127.0.0.1:8000 in a modern browser.');
+    }
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false
+    });
+
+    micAudioContext = new AudioContext();
+    playbackAudioContext = new AudioContext();
+    await Promise.all([micAudioContext.resume(), playbackAudioContext.resume()]);
+
+    const micSource = micAudioContext.createMediaStreamSource(micStream);
+    // ScriptProcessor is deprecated but widely supported; zero-gain output keeps
+    // its audio processing callback active without monitoring the microphone aloud.
+    processor = micAudioContext.createScriptProcessor(2048, 1, 1);
+    muteGain = micAudioContext.createGain();
+    muteGain.gain.value = 0;
+    processor.onaudioprocess = (event) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const captured = event.inputBuffer.getChannelData(0);
+      const resampled = resampleFloat32(captured, micAudioContext.sampleRate, INPUT_RATE);
+      const pcm = floatToPcm16(resampled);
+      sendJson({ type: 'audio', data: bytesToBase64(pcm) });
+    };
+    micSource.connect(processor);
+    processor.connect(muteGain);
+    muteGain.connect(micAudioContext.destination);
+  }
+
+  async function cleanupAudio() {
+    stopVisualInput({ notify: false, statusMessage: 'Visuals off' });
+    stopPlayback();
+    if (micStream) {
+      for (const track of micStream.getTracks()) track.stop();
+      micStream = null;
+    }
+    if (processor) { try { processor.disconnect(); } catch (_) {} processor.onaudioprocess = null; processor = null; }
+    if (muteGain) { try { muteGain.disconnect(); } catch (_) {} muteGain = null; }
+    if (micAudioContext && micAudioContext.state !== 'closed') {
+      try { await micAudioContext.close(); } catch (_) {}
+    }
+    if (playbackAudioContext && playbackAudioContext.state !== 'closed') {
+      try { await playbackAudioContext.close(); } catch (_) {}
+    }
+    micAudioContext = null;
+    playbackAudioContext = null;
+    activeSources.clear();
+    nextPlaybackTime = 0;
+  }
+
+  function setVisualStatus(message, active = false) {
+    visualIndicator.textContent = message;
+    visualIndicator.classList.toggle('active', active);
+    visualLiveBadge.hidden = !active;
+  }
+
+  function isSocketOpen() {
+    return Boolean(ws && ws.readyState === WebSocket.OPEN);
+  }
+
+  function captureVisualFrame() {
+    if (frameCaptureInProgress || !visualStream || !isSocketOpen()) return;
+    if (!visualVideo.videoWidth || !visualVideo.videoHeight || visualVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+
+    frameCaptureInProgress = true;
+    const streamAtCapture = visualStream;
+    const modeAtCapture = visualMode;
+
+    (async () => {
+      try {
+        // Keep detail useful for reading a shared screen without sending full-resolution video.
+        const sourceWidth = visualVideo.videoWidth;
+        const sourceHeight = visualVideo.videoHeight;
+        const scale = Math.min(1, 1024 / Math.max(sourceWidth, sourceHeight));
+        const width = Math.max(1, Math.round(sourceWidth * scale));
+        const height = Math.max(1, Math.round(sourceHeight * scale));
+        visualCanvas.width = width;
+        visualCanvas.height = height;
+        visualContext.drawImage(visualVideo, 0, 0, width, height);
+
+        const blob = await new Promise((resolve) => visualCanvas.toBlob(resolve, 'image/jpeg', 0.62));
+        if (!blob || streamAtCapture !== visualStream || !isSocketOpen()) return;
+
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const encoded = bytesToBase64(bytes);
+        if (encoded.length > 2_800_000) {
+          setVisualStatus('Frame too large — try a smaller window', true);
+          return;
+        }
+        sendJson({ type: 'video_frame', mode: modeAtCapture, data: encoded });
+      } catch (error) {
+        console.error('Could not capture visual frame:', error);
+        setVisualStatus('Could not capture frame', Boolean(visualStream));
+      } finally {
+        frameCaptureInProgress = false;
+      }
+    })();
+  }
+
+  function stopVisualInput({ notify = true, statusMessage = 'Visuals off' } = {}) {
+    const previousMode = visualMode;
+    const previousStream = visualStream;
+    visualStream = null;
+    visualMode = null;
+    frameCaptureInProgress = false;
+    if (visualTimer !== null) {
+      clearInterval(visualTimer);
+      visualTimer = null;
+    }
+
+    if (previousStream) {
+      for (const track of previousStream.getTracks()) {
+        track.onended = null;
+        try { track.stop(); } catch (_) { /* Track already stopped. */ }
+      }
+    }
+    visualVideo.pause();
+    visualVideo.srcObject = null;
+    visualVideo.style.display = 'none';
+    visualPlaceholder.style.display = 'grid';
+    visualLiveBadge.hidden = true;
+    setVisualStatus(statusMessage, false);
+
+    if (notify && previousMode && isSocketOpen()) {
+      sendJson({ type: 'visual_state', mode: previousMode, active: false });
+    }
+    updateButtons(isSocketOpen());
+  }
+
+  async function startVisualInput(mode) {
+    if (!isSocketOpen()) {
+      setVisualStatus('Connect to Denise first', false);
+      return;
+    }
+    if (!navigator.mediaDevices) {
+      setVisualStatus('Camera/screen capture is unavailable in this browser', false);
+      return;
+    }
+
+    let streamPromise;
+    try {
+      // Invoke getDisplayMedia immediately from the click handler so the browser's
+      // user-activation requirement is satisfied for screen sharing.
+      if (mode === 'camera') {
+        if (!navigator.mediaDevices.getUserMedia) throw new Error('Camera capture is not supported by this browser.');
+        streamPromise = navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 5, max: 15 } },
+          audio: false
+        });
+      } else {
+        if (!navigator.mediaDevices.getDisplayMedia) throw new Error('Screen sharing is not supported by this browser.');
+        streamPromise = navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: { ideal: 5, max: 15 } },
+          audio: false
+        });
+      }
+
+      stopVisualInput({ notify: true, statusMessage: 'Switching visual source…' });
+      const stream = await streamPromise;
+      if (!isSocketOpen()) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
+      visualStream = stream;
+      visualMode = mode;
+      visualVideo.srcObject = stream;
+      visualVideo.style.display = 'block';
+      visualPlaceholder.style.display = 'none';
+      await visualVideo.play();
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.addEventListener('ended', () => {
+          if (visualStream === stream) {
+            stopVisualInput({ notify: true, statusMessage: mode === 'screen' ? 'Screen share ended' : 'Camera stopped' });
+          }
+        }, { once: true });
+      }
+
+      const sourceName = mode === 'camera' ? 'Camera' : 'Screen share';
+      setVisualStatus(`${sourceName} active`, true);
+      sendJson({ type: 'visual_state', mode, active: true });
+      captureVisualFrame();
+      // Gemini Live accepts video frames at a maximum of 1 fps; 1.1s leaves a little headroom.
+      visualTimer = window.setInterval(captureVisualFrame, 1100);
+      updateButtons(true);
+    } catch (error) {
+      console.error('Could not start visual input:', error);
+      const message = error && error.name === 'NotAllowedError'
+        ? (mode === 'screen' ? 'Screen sharing was cancelled or permission was denied' : 'Camera permission was denied')
+        : (error.message || 'Could not start visual input');
+      stopVisualInput({ notify: false, statusMessage: message });
+    }
+  }
+
+  function updateButtons(connected) {
+    startBtn.disabled = connected || isConnecting;
+    stopBtn.disabled = !connected && !isConnecting;
+    textInput.disabled = !connected;
+    sendBtn.disabled = !connected;
+    cameraBtn.disabled = !connected;
+    screenBtn.disabled = !connected;
+    stopVisualsBtn.disabled = !connected || !visualStream;
+  }
+
+  async function connect() {
+    if (isConnecting || (ws && ws.readyState === WebSocket.OPEN)) return;
+    isConnecting = true;
+    userRequestedDisconnect = false;
+    lastError = '';
+    updateButtons(false);
+    setStatus('Connecting to local backend…');
+
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (error) {
+      isConnecting = false;
+      updateButtons(false);
+      setStatus('Could not create WebSocket: ' + error.message, 'error');
+      return;
+    }
+
+    ws.onopen = async () => {
+      try {
+        setStatus('Allow microphone access in your browser…');
+        await startMicrophone();
+        isConnecting = false;
+        updateButtons(true);
+        setStatus('Connected. Speak naturally, then pause so Gemini can respond.', 'live');
+        textInput.focus();
+      } catch (error) {
+        lastError = error.message || String(error);
+        setStatus(lastError, 'error');
+        isConnecting = false;
+        updateButtons(false);
+        await cleanupAudio();
+        if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
+      }
+    };
+
+    ws.onmessage = async (event) => {
+      let message;
+      try { message = JSON.parse(event.data); }
+      catch (_) { return; }
+
+      switch (message.type) {
+        case 'status':
+          setStatus(message.message || 'Connected.', 'live');
+          break;
+        case 'audio':
+          playOutputChunk(message.data);
+          break;
+        case 'transcript':
+          addMessage(message.speaker, message.text);
+          break;
+        case 'interrupted':
+          stopPlayback();
+          setStatus('Gemini response interrupted — listening to you.', 'live');
+          break;
+        case 'turn_complete':
+          setStatus('Ready — you can keep talking.', 'live');
+          break;
+        case 'visual_status':
+          setVisualStatus(message.message || 'Visual status updated', Boolean(message.active));
+          break;
+        case 'error':
+          lastError = message.message || 'An unknown server error occurred.';
+          setStatus(lastError, 'error');
+          console.error('Gemini bridge error:', lastError);
+          break;
+      }
+    };
+
+    ws.onerror = () => {
+      lastError = 'WebSocket connection failed. Is server.py running in the terminal?';
+      setStatus(lastError, 'error');
+    };
+
+    ws.onclose = async () => {
+      isConnecting = false;
+      updateButtons(false);
+      await cleanupAudio();
+      ws = null;
+      if (lastError) setStatus(lastError, 'error');
+      else if (userRequestedDisconnect) setStatus('Disconnected.');
+      else setStatus('Connection closed. Check the Python terminal if this was unexpected.', 'error');
+    };
+  }
+
+  async function disconnect() {
+    userRequestedDisconnect = true;
+    isConnecting = false;
+    updateButtons(false);
+    const socket = ws;
+    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, 'User disconnected');
+    await cleanupAudio();
+    if (!socket || socket.readyState === WebSocket.CLOSED) {
+      ws = null;
+      setStatus('Disconnected.');
+    }
+  }
+
+  textForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const text = textInput.value.trim();
+    if (!text) return;
+    if (sendJson({ type: 'text', text })) {
+      addMessage('you', text);
+      textInput.value = '';
+      textInput.focus();
+    } else {
+      setStatus('Not connected. Connect before sending a message.', 'error');
+    }
+  });
+
+  startBtn.addEventListener('click', connect);
+  stopBtn.addEventListener('click', disconnect);
+  cameraBtn.addEventListener('click', () => startVisualInput('camera'));
+  screenBtn.addEventListener('click', () => startVisualInput('screen'));
+  stopVisualsBtn.addEventListener('click', () => stopVisualInput({ notify: true, statusMessage: 'Visuals off' }));
+  clearBtn.addEventListener('click', () => {
+    chat.innerHTML = '';
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
+    if (micStream) micStream.getTracks().forEach(track => track.stop());
+    if (visualStream) visualStream.getTracks().forEach(track => track.stop());
+    if (visualTimer !== null) clearInterval(visualTimer);
+  });
+})();
+</script>
+</body>
+</html>
