@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Denise — Live Voice &amp; Vision</title>
+  <title>Ozzy — Live Voice &amp; Vision</title>
   <style>
     :root { color-scheme: light; --ink: #172033; --muted: #64748b; --line: #e2e8f0; --accent: #4f46e5; }
     * { box-sizing: border-box; }
@@ -66,7 +66,7 @@
   <main class="app">
     <header>
       <div class="eyebrow">Real-time AI · Voice + Vision</div>
-      <h1>Denise — Live Voice &amp; Vision</h1>
+      <h1>Ozzy — Live Voice &amp; Vision</h1>
       <p class="subtitle">Talk naturally, type a message, or share your camera or screen for visual questions.</p>
       <div class="status-row"><span id="status-dot" class="dot"></span><span id="status" role="status" aria-live="polite">Disconnected — connect to begin.</span></div>
     </header>
@@ -78,8 +78,8 @@
     <section class="visual-panel" aria-label="Camera and screen share">
       <div class="visual-heading">
         <div>
-          <div class="visual-title">👁️ Denise's visual awareness</div>
-          <div class="visual-description">Share your camera or screen so Denise can answer questions about what is visible.</div>
+          <div class="visual-title">👁️ Ozzy's visual awareness</div>
+          <div class="visual-description">Share your camera or screen so Ozzy can answer questions about what is visible.</div>
         </div>
         <span id="visual-indicator" class="privacy-indicator" role="status" aria-live="polite">Visuals off</span>
       </div>
@@ -170,7 +170,7 @@
     item.className = 'message ' + (speaker === 'you' ? 'you' : 'gemini');
     const label = document.createElement('div');
     label.className = 'speaker';
-    label.textContent = speaker === 'you' ? 'You' : 'Denise';
+    label.textContent = speaker === 'you' ? 'You' : 'Ozzy';
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.textContent = cleanText;
@@ -394,7 +394,7 @@
 
   async function startVisualInput(mode) {
     if (!isSocketOpen()) {
-      setVisualStatus('Connect to Denise first', false);
+      setVisualStatus('Connect to Ozzy first', false);
       return;
     }
     if (!navigator.mediaDevices) {
