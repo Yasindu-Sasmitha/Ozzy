@@ -2,3 +2,13 @@
 .venv/
 __pycache__/
 *.py[cod]
+node_modules/
+release/
+build/
+backend-dist/
+*.spec
+data/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.log

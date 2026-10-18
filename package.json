@@ -1,0 +1,46 @@
+{
+  "name": "ozzy-desktop",
+  "version": "0.2.0",
+  "description": "Ozzy - Gemini Live voice, vision, and consent-first persistent memory",
+  "main": "desktop/main.js",
+  "private": true,
+  "author": "Yasindu Sasmitha",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test:memory": "python -m unittest discover -s tests -v",
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend.ps1",
+    "dist:win": "npm run build:backend && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.yasindu.ozzy",
+    "productName": "Ozzy",
+    "asar": true,
+    "files": [
+      "desktop/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend-dist/ozzy-backend.exe",
+        "to": "backend/ozzy-backend.exe"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

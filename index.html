@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ozzy — Live Voice &amp; Vision</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://127.0.0.1:8000; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8765; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+  <title>Ozzy Desktop — Voice, Vision &amp; Memory</title>
   <style>
     :root { color-scheme: light; --ink: #172033; --muted: #64748b; --line: #e2e8f0; --accent: #4f46e5; }
     * { box-sizing: border-box; }
@@ -59,6 +60,33 @@
     .visual-live-badge { position: absolute; top: 12px; left: 12px; padding: 6px 9px; border-radius: 7px; color: #fff; background: #dc2626; font-size: 10px; font-weight: 850; letter-spacing: .08em; box-shadow: 0 2px 10px #0003; }
     .visual-buttons { margin-top: 12px; }
     .privacy-note { margin: 11px 0 0; color: var(--muted); text-align: center; font-size: 11px; line-height: 1.5; }
+    .memory-panel { padding: 18px 24px 20px; border-top: 1px solid var(--line); background: #f8fafc; }
+    .memory-panel[hidden], .modal-backdrop[hidden] { display: none !important; }
+    .memory-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .memory-title { font-size: 14px; font-weight: 850; }
+    .memory-description { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0 0 12px; }
+    .memory-list { display: grid; gap: 9px; max-height: 290px; overflow: auto; }
+    .memory-item { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .memory-item-main { min-width: 0; }
+    .memory-meta { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-bottom: 5px; }
+    .memory-category { display: inline-block; border-radius: 999px; background: #eef2ff; color: #4338ca; padding: 3px 8px; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    .memory-date { color: #94a3b8; font-size: 10px; }
+    .memory-content { font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .memory-empty { border: 1px dashed #cbd5e1; border-radius: 12px; padding: 18px; text-align: center; color: var(--muted); font-size: 12px; }
+    .small-button { padding: 7px 9px; border-radius: 9px; font-size: 11px; flex: 0 0 auto; }
+    .modal-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 18px; background: #0f172a99; backdrop-filter: blur(5px); }
+    .modal-card { width: min(540px, 100%); max-height: min(80vh, 700px); overflow: auto; background: #fff; border-radius: 20px; padding: 22px; box-shadow: 0 24px 90px #02061755; }
+    .modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .modal-heading h2 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .modal-description { margin: 10px 0 14px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .approval-content { display: grid; gap: 8px; }
+    .approval-memory { display: flex; align-items: flex-start; gap: 9px; padding: 11px; border: 1px solid var(--line); border-radius: 11px; background: #f8fafc; }
+    .approval-memory input { flex: 0 0 auto; width: auto; margin: 3px 0 0; }
+    .approval-memory-text { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+    .approval-memory-meta { display: block; color: var(--muted); font-size: 10px; margin-bottom: 3px; text-transform: uppercase; font-weight: 800; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+    .modal-actions .primary { background: #4f46e5; }
+    .modal-warning { padding: 10px 12px; border-radius: 10px; background: #fff7ed; color: #9a3412; font-size: 12px; line-height: 1.5; }
     @media (max-width: 520px) { body { padding: 10px; } .app { border-radius: 18px; } header { padding: 22px 19px 17px; } .chat { padding: 18px 15px; } .controls { padding: 16px; } .visual-panel { padding: 16px; } .visual-heading { align-items: flex-start; flex-direction: column; } .visual-preview { min-height: 155px; } .message { max-width: 94%; } button { padding: 11px 13px; } }
   </style>
 </head>
@@ -73,6 +101,18 @@
 
     <section id="chat" class="chat" aria-label="Conversation">
       <div id="empty-state" class="empty"><div class="mic">🎙️</div><strong>Your conversation starts here</strong><span>Connect, then say hello.</span></div>
+    </section>
+
+    <section id="memory-panel" class="memory-panel" hidden aria-label="Saved memories">
+      <div class="memory-heading">
+        <div class="memory-title">🧠 Ozzy's saved memories</div>
+        <div class="buttons">
+          <button id="refresh-memories-btn" class="secondary small-button">Refresh</button>
+          <button id="close-memory-panel-btn" class="secondary small-button">Close</button>
+        </div>
+      </div>
+      <p class="memory-description">These memories are stored locally in SQLite. Ozzy can suggest a new memory, but nothing is saved or deleted from a voice request without your approval.</p>
+      <div id="memory-list" class="memory-list"><div class="memory-empty">Loading memories…</div></div>
     </section>
 
     <section class="visual-panel" aria-label="Camera and screen share">
@@ -104,15 +144,31 @@
       <div class="buttons">
         <button id="start-btn" class="primary">Connect &amp; Talk</button>
         <button id="stop-btn" class="danger" disabled>Disconnect</button>
+        <button id="memory-btn" class="secondary">Memories</button>
         <button id="clear-btn" class="secondary">Clear chat</button>
       </div>
       <form id="text-form" class="text-form">
         <input id="text-input" type="text" placeholder="Type a message…" autocomplete="off" aria-label="Type a message" disabled>
         <button id="send-btn" class="secondary" type="submit" disabled>Send</button>
       </form>
-      <p class="hint">Your microphone is processed in this browser and streamed to your local Python backend. Keep the terminal open while chatting.</p>
+      <p class="hint">Your microphone is streamed through Ozzy’s local backend to Gemini. Camera and screen sharing are opt-in; saved memories remain on this device.</p>
     </section>
   </main>
+
+  <div id="memory-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="memory-modal-title">
+    <div class="modal-card">
+      <div class="modal-heading">
+        <h2 id="memory-modal-title">Memory approval</h2>
+      </div>
+      <p id="memory-modal-description" class="modal-description"></p>
+      <div id="memory-modal-content" class="approval-content"></div>
+      <div class="modal-warning">Your memory database stays on this device. Do not save passwords, API keys, access tokens, private keys, or payment-card information.</div>
+      <div class="modal-actions">
+        <button id="memory-reject-btn" class="secondary">Not now</button>
+        <button id="memory-approve-btn" class="primary">Approve</button>
+      </div>
+    </div>
+  </div>
 
 <script>
 (() => {
@@ -138,6 +194,17 @@
   const visualPlaceholder = document.getElementById('visual-placeholder');
   const visualIndicator = document.getElementById('visual-indicator');
   const visualLiveBadge = document.getElementById('visual-live-badge');
+  const memoryBtn = document.getElementById('memory-btn');
+  const memoryPanel = document.getElementById('memory-panel');
+  const memoryList = document.getElementById('memory-list');
+  const refreshMemoriesBtn = document.getElementById('refresh-memories-btn');
+  const closeMemoryPanelBtn = document.getElementById('close-memory-panel-btn');
+  const memoryModal = document.getElementById('memory-modal');
+  const memoryModalTitle = document.getElementById('memory-modal-title');
+  const memoryModalDescription = document.getElementById('memory-modal-description');
+  const memoryModalContent = document.getElementById('memory-modal-content');
+  const memoryApproveBtn = document.getElementById('memory-approve-btn');
+  const memoryRejectBtn = document.getElementById('memory-reject-btn');
 
   let ws = null;
   let micStream = null;
@@ -156,6 +223,8 @@
   let frameCaptureInProgress = false;
   const visualCanvas = document.createElement('canvas');
   const visualContext = visualCanvas.getContext('2d', { alpha: false });
+  const approvalQueue = [];
+  let activeApproval = null;
 
   function setStatus(message, kind = 'normal') {
     statusText.textContent = message;
@@ -177,6 +246,153 @@
     item.append(label, bubble);
     chat.appendChild(item);
     chat.scrollTop = chat.scrollHeight;
+  }
+
+  function formatMemoryDate(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+  }
+
+  async function loadMemories() {
+    memoryList.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'memory-empty';
+    loading.textContent = 'Loading memories…';
+    memoryList.appendChild(loading);
+    try {
+      const response = await fetch('/api/memories', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load memories');
+      const memories = Array.isArray(data.memories) ? data.memories : [];
+      memoryList.replaceChildren();
+      if (!memories.length) {
+        const empty = document.createElement('div');
+        empty.className = 'memory-empty';
+        empty.textContent = 'No saved memories yet. Tell Ozzy “remember that…” to propose one.';
+        memoryList.appendChild(empty);
+        return;
+      }
+      for (const memory of memories) {
+        const item = document.createElement('article');
+        item.className = 'memory-item';
+        const main = document.createElement('div');
+        main.className = 'memory-item-main';
+        const meta = document.createElement('div');
+        meta.className = 'memory-meta';
+        const category = document.createElement('span');
+        category.className = 'memory-category';
+        category.textContent = String(memory.category || 'fact');
+        const date = document.createElement('span');
+        date.className = 'memory-date';
+        date.textContent = formatMemoryDate(memory.updated_at || memory.created_at);
+        meta.append(category, date);
+        const content = document.createElement('div');
+        content.className = 'memory-content';
+        content.textContent = String(memory.content || '');
+        main.append(meta, content);
+        const remove = document.createElement('button');
+        remove.className = 'danger small-button';
+        remove.textContent = 'Forget';
+        remove.title = 'Delete this saved memory';
+        remove.addEventListener('click', async () => {
+          if (!window.confirm('Delete this saved memory? This cannot be undone.')) return;
+          try {
+            const result = await fetch('/api/memories/' + encodeURIComponent(memory.id), { method: 'DELETE' });
+            const body = await result.json();
+            if (!result.ok) throw new Error(body.error || 'Could not delete memory');
+            setStatus('Memory deleted.', 'live');
+            await loadMemories();
+          } catch (error) {
+            setStatus(error.message || 'Could not delete memory.', 'error');
+          }
+        });
+        item.append(main, remove);
+        memoryList.appendChild(item);
+      }
+    } catch (error) {
+      memoryList.replaceChildren();
+      const failed = document.createElement('div');
+      failed.className = 'memory-empty';
+      failed.textContent = 'Could not load memories: ' + (error.message || String(error));
+      memoryList.appendChild(failed);
+    }
+  }
+
+  function queueMemoryApproval(message) {
+    approvalQueue.push(message);
+    if (!activeApproval) showNextMemoryApproval();
+  }
+
+  function showNextMemoryApproval() {
+    activeApproval = approvalQueue.shift() || null;
+    if (!activeApproval) {
+      memoryModal.hidden = true;
+      return;
+    }
+    memoryModalContent.replaceChildren();
+    if (activeApproval.action === 'save') {
+      memoryModalTitle.textContent = 'Save this memory?';
+      memoryModalDescription.textContent = 'Ozzy would like to save the following item because you asked him to remember it. Nothing is saved until you approve.';
+      const card = document.createElement('div');
+      card.className = 'approval-memory';
+      const body = document.createElement('div');
+      body.className = 'approval-memory-text';
+      const meta = document.createElement('span');
+      meta.className = 'approval-memory-meta';
+      meta.textContent = String(activeApproval.category || 'fact');
+      const content = document.createElement('div');
+      content.textContent = String(activeApproval.content || '');
+      body.append(meta, content);
+      card.appendChild(body);
+      memoryModalContent.appendChild(card);
+      memoryApproveBtn.textContent = 'Save memory';
+      memoryApproveBtn.disabled = false;
+    } else {
+      memoryModalTitle.textContent = 'Forget selected memories?';
+      memoryModalDescription.textContent = 'Select exactly which saved items should be deleted. Nothing will be removed until you approve the selected items.';
+      const memories = Array.isArray(activeApproval.memories) ? activeApproval.memories : [];
+      for (const memory of memories) {
+        const label = document.createElement('label');
+        label.className = 'approval-memory';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = String(memory.id);
+        checkbox.addEventListener('change', updateApproveButton);
+        const body = document.createElement('span');
+        body.className = 'approval-memory-text';
+        const meta = document.createElement('span');
+        meta.className = 'approval-memory-meta';
+        meta.textContent = String(memory.category || 'fact') + ' · ' + formatMemoryDate(memory.created_at);
+        const content = document.createElement('span');
+        content.textContent = String(memory.content || '');
+        body.append(meta, content);
+        label.append(checkbox, body);
+        memoryModalContent.appendChild(label);
+      }
+      memoryApproveBtn.textContent = 'Forget selected';
+      memoryApproveBtn.disabled = true;
+    }
+    memoryModal.hidden = false;
+  }
+
+  function updateApproveButton() {
+    if (activeApproval && activeApproval.action === 'delete') {
+      memoryApproveBtn.disabled = !memoryModalContent.querySelector('input[type="checkbox"]:checked');
+    }
+  }
+
+  function decideMemoryApproval(approved) {
+    if (!activeApproval) return;
+    const request = activeApproval;
+    const selectedIds = approved && request.action === 'delete'
+      ? Array.from(memoryModalContent.querySelectorAll('input[type="checkbox"]:checked')).map(input => Number(input.value)).filter(Number.isInteger)
+      : [];
+    sendJson({ type: 'memory_decision', requestId: request.requestId, approved: Boolean(approved), selectedIds });
+    activeApproval = null;
+    memoryModal.hidden = true;
+    if (!approved) setStatus('Memory action cancelled.', 'live');
+    showNextMemoryApproval();
   }
 
   function bytesToBase64(bytes) {
@@ -294,6 +510,10 @@
 
   async function cleanupAudio() {
     stopVisualInput({ notify: false, statusMessage: 'Visuals off' });
+    // Never leave a memory approval dialog open after the Live session ends.
+    activeApproval = null;
+    approvalQueue.length = 0;
+    memoryModal.hidden = true;
     stopPlayback();
     if (micStream) {
       for (const track of micStream.getTracks()) track.stop();
@@ -529,6 +749,12 @@
         case 'visual_status':
           setVisualStatus(message.message || 'Visual status updated', Boolean(message.active));
           break;
+        case 'memory_approval':
+          queueMemoryApproval(message);
+          break;
+        case 'memory_changed':
+          if (!memoryPanel.hidden) loadMemories();
+          break;
         case 'error':
           lastError = message.message || 'An unknown server error occurred.';
           setStatus(lastError, 'error');
@@ -587,6 +813,25 @@
   clearBtn.addEventListener('click', () => {
     chat.innerHTML = '';
   });
+  memoryBtn.addEventListener('click', async () => {
+    memoryPanel.hidden = !memoryPanel.hidden;
+    if (!memoryPanel.hidden) await loadMemories();
+  });
+  refreshMemoriesBtn.addEventListener('click', loadMemories);
+  closeMemoryPanelBtn.addEventListener('click', () => { memoryPanel.hidden = true; });
+  memoryApproveBtn.addEventListener('click', () => decideMemoryApproval(true));
+  memoryRejectBtn.addEventListener('click', () => decideMemoryApproval(false));
+  memoryModal.addEventListener('click', (event) => {
+    if (event.target === memoryModal) decideMemoryApproval(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !memoryModal.hidden) decideMemoryApproval(false);
+  });
+
+  fetch('/api/health', { cache: 'no-store' }).then(response => response.json()).then(health => {
+    if (!health.apiKeyConfigured) setStatus('API key missing — configure GEMINI_API_KEY in .env before connecting.', 'error');
+    else setStatus('Ready to connect. Your saved memories stay on this device.', 'normal');
+  }).catch(() => { /* Page can still show its connection status if the health check is unavailable. */ });
 
   window.addEventListener('beforeunload', () => {
     if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
