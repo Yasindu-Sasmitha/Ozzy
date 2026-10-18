@@ -43,7 +43,7 @@
     .thinking-spark span:nth-child(1) { left: 4px; top: 0; transform: rotate(-5deg); }
     .thinking-spark span:nth-child(2) { left: 19px; top: 5px; transform: rotate(25deg); }
     .thinking-spark span:nth-child(3) { left: 29px; top: 17px; height: 10px; transform: rotate(62deg); }
-    .eyes-pair[data-state="idle"] .eyes-inner { animation: ozzy-gaze 8.8s ease-in-out infinite; }
+    /* Gaze is driven by a small randomized controller below, not a repetitive CSS loop. */
     .eyes-pair[data-state="connecting"] .ozzy-eye { animation: ozzy-connect-pulse 1.05s ease-in-out infinite alternate; }
     .eyes-pair[data-state="listening"] .ozzy-eye {
       box-shadow: 0 0 12px #25cfee99, 0 0 32px #25cfee60, 0 0 55px #25cfee20;
@@ -53,7 +53,7 @@
     .eyes-pair[data-state="thinking"] .ozzy-eye-right { transform: translateY(-4px) rotate(5deg); }
     .eyes-pair[data-state="thinking"] .thinking-spark { opacity: 1; }
     .eyes-pair[data-state="speaking"] .ozzy-eye { animation: ozzy-speech-eyes .26s ease-in-out infinite alternate; }
-    .eyes-pair[data-state="visual"] .eyes-inner { animation: ozzy-scan 3.4s ease-in-out infinite; }
+    .eyes-pair[data-state="visual"] .eyes-inner { transition-duration: .48s; }
     .eyes-pair[data-state="visual"] .ozzy-eye { box-shadow: 0 0 13px #25cfeeaa, 0 0 34px #25cfee55, 0 0 60px #25cfee25; }
     .eyes-pair[data-state="happy"] .ozzy-eye { height: 43px; border-radius: 9px 9px 18px 18px; transform: translateY(9px); }
     .eyes-pair[data-state="happy"] { transform: translateY(-2px); }
@@ -65,6 +65,8 @@
       position: absolute; z-index: 4; left: 50%; top: 50%; width: 200px; height: 185px;
       max-width: 72vw; object-fit: contain; transform: translate(-50%, -50%);
       pointer-events: none; user-select: none; -webkit-user-drag: none;
+      transform: translate(calc(-50% + var(--ozzy-gaze-x, 0px)), calc(-50% + var(--ozzy-gaze-y, 0px)));
+      transition: transform .38s cubic-bezier(.2, .8, .2, 1);
     }
     .eyes-pair.has-art .eyes-inner, .eyes-pair.has-art .thinking-spark {
       opacity: 0 !important; visibility: hidden !important;
@@ -81,7 +83,7 @@
     }
     .eyes-pair[data-emotion="concerned"] .ozzy-eye-left { transform: translateY(4px) rotate(7deg); }
     .eyes-pair[data-emotion="concerned"] .ozzy-eye-right { transform: translateY(4px) rotate(-7deg); }
-    .eyes-pair[data-emotion="curious"] .eyes-inner { transform: translate(2px, -2px) rotate(-3deg); }
+    .eyes-pair[data-emotion="curious"] .eyes-inner { transform: translate3d(var(--ozzy-gaze-x, 0px), var(--ozzy-gaze-y, 0px), 0) translate(2px, -2px) rotate(-3deg); }
     .eyes-pair[data-emotion="curious"] .ozzy-eye-left { height: 57px; transform: translateY(5px) scale(.94); }
     .eyes-pair[data-emotion="curious"] .ozzy-eye-right { height: 69px; transform: translateY(-3px); }
     .eyes-pair[data-emotion="annoyed"] .ozzy-eye { height: 52px; border-radius: 5px 5px 9px 9px; }
@@ -92,9 +94,9 @@
     .eyes-pair[data-emotion="excited"] .ozzy-eye { box-shadow: 0 0 15px #25cfeeaa, 0 0 38px #25cfee70, 0 0 65px #25cfee2b; }
     .eyes-pair[data-emotion="excited"] { animation: ozzy-excited-bounce .52s ease-in-out 3; }
     .eyes-pair[data-emotion="shy"] .ozzy-eye { height: 49px; opacity: .86; }
-    .eyes-pair[data-emotion="shy"] .eyes-inner { transform: translateY(8px) scale(.93); }
+    .eyes-pair[data-emotion="shy"] .eyes-inner { transform: translate3d(var(--ozzy-gaze-x, 0px), var(--ozzy-gaze-y, 0px), 0) translateY(8px) scale(.93); }
     .eyes-pair[data-emotion="sleepy"] .emotion-art { animation: ozzy-sleepy-float 4.6s ease-in-out infinite; }
-    .eyes-inner { display: flex; align-items: center; justify-content: center; gap: 18px; transform: translateX(0); transition: transform .24s ease, opacity .18s ease; }
+    .eyes-inner { display: flex; align-items: center; justify-content: center; gap: 18px; transform: translate3d(var(--ozzy-gaze-x, 0px), var(--ozzy-gaze-y, 0px), 0) translateX(0); transition: transform .38s cubic-bezier(.2, .8, .2, 1), opacity .18s ease; will-change: transform; }
     .advanced-launcher {
       position: fixed; z-index: 20; right: 20px; bottom: 18px;
       display: inline-flex; align-items: center; gap: 9px; min-height: 40px;
@@ -120,11 +122,11 @@
     .advanced-header-row .eyebrow { margin: 0; }
     .advanced-back { display: inline-flex; align-items: center; gap: 6px; padding: 8px 11px; border-radius: 10px; font-size: 11px; }
     @keyframes ozzy-eye-blink { 0%, 89%, 91%, 100% { transform: scaleY(0); } 90% { transform: scaleY(1); } }
-    @keyframes ozzy-gaze { 0%, 20%, 28%, 58%, 66%, 100% { transform: translateX(0); } 23%, 26% { transform: translateX(-2px); } 61%, 64% { transform: translateX(2px); } }
+    /* The JS gaze controller varies direction, dwell time, and occasional quick glances. */
     @keyframes ozzy-connect-pulse { from { box-shadow: 0 0 8px #25cfee55, 0 0 18px #25cfee22; } to { box-shadow: 0 0 14px #25cfeeaa, 0 0 34px #25cfee55; } }
     @keyframes ozzy-speech-eyes { from { transform: scaleY(.96); } to { transform: scaleY(1.04); } }
-    @keyframes ozzy-scan { 0%, 100% { transform: translateX(0); } 35% { transform: translateX(-3px); } 70% { transform: translateX(3px); } }
-    @keyframes ozzy-sleepy-float { 0%, 100% { transform: translate(-50%, -50%) translateY(0); } 50% { transform: translate(-50%, -50%) translateY(3px); } }
+
+    @keyframes ozzy-sleepy-float { 0%, 100% { transform: translate(calc(-50% + var(--ozzy-gaze-x, 0px)), calc(-50% + var(--ozzy-gaze-y, 0px))) translateY(0); } 50% { transform: translate(calc(-50% + var(--ozzy-gaze-x, 0px)), calc(-50% + var(--ozzy-gaze-y, 0px))) translateY(3px); } }
     @keyframes ozzy-excited-bounce { 0%, 100% { transform: translateY(0); } 30% { transform: translateY(-7px); } 60% { transform: translateY(2px); } }
     @media (max-height: 440px) { .ozzy-eye { width: 48px; height: 56px; flex-basis: 48px; } .eyes-pair { gap: 15px; height: 110px; } }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
@@ -351,6 +353,7 @@
   const advancedOpenBtn = document.getElementById('advanced-open-btn');
   const backHomeBtn = document.getElementById('back-home-btn');
   const robotFace = document.getElementById('ozzy-face');
+  const eyesInner = robotFace ? robotFace.querySelector('.eyes-inner') : null;
   const emotionArt = document.getElementById('ozzy-emotion-art');
   const EXPRESSION_ART = {
     love: "data:image/png;base64,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",
@@ -383,6 +386,11 @@
   let idleSleepTimer = null;
   let lastVoiceActivityAt = Date.now();
   let currentEmotion = 'neutral';
+  let gazeTimer = null;
+  let gazeReturnTimer = null;
+  let gazeDartTimer = null;
+  let pointerGazeTimer = null;
+  let previousGazeTarget = { x: 0, y: 0 };
   const visualCanvas = document.createElement('canvas');
   const visualContext = visualCanvas.getContext('2d', { alpha: false });
   const approvalQueue = [];
@@ -395,6 +403,7 @@
 
   function setEmotion(nextEmotion, durationMs = 0) {
     const emotion = EMOTION_NAMES.has(nextEmotion) ? nextEmotion : 'neutral';
+    const emotionChanged = currentEmotion !== emotion;
     if (emotionTimer !== null) { clearTimeout(emotionTimer); emotionTimer = null; }
     currentEmotion = emotion;
     if (robotFace) {
@@ -426,6 +435,7 @@
         if (currentEmotion === emotion) setEmotion('neutral');
       }, durationMs);
     }
+    if (emotionChanged) scheduleNextGaze(randomBetween(180, 380));
   }
 
   function inferConversationEmotion(text) {
@@ -466,9 +476,126 @@
     scheduleIdleSleep();
   }
 
+  function randomBetween(min, max) {
+    return Math.round(min + Math.random() * (max - min));
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function applyGaze(x, y) {
+    const safeX = clamp(Number(x) || 0, -12, 12);
+    const safeY = clamp(Number(y) || 0, -7, 7);
+    if (robotFace) {
+      robotFace.style.setProperty('--ozzy-gaze-x', `${safeX.toFixed(1)}px`);
+      robotFace.style.setProperty('--ozzy-gaze-y', `${safeY.toFixed(1)}px`);
+    }
+    previousGazeTarget = { x: safeX, y: safeY };
+  }
+
+  function gazeProfile() {
+    if (currentEmotion === 'sleepy') return { pauseMin: 2000, pauseMax: 3400, holdMin: 700, holdMax: 1250, x: 3.5, y: 2.2 };
+    if (currentEmotion === 'curious' || currentEmotion === 'confused' || currentEmotion === 'surprised') {
+      return { pauseMin: 480, pauseMax: 1050, holdMin: 320, holdMax: 720, x: 11, y: 6.5 };
+    }
+    if (currentEmotion === 'excited' || currentEmotion === 'happy' || currentEmotion === 'love') {
+      return { pauseMin: 600, pauseMax: 1300, holdMin: 350, holdMax: 800, x: 9, y: 5.5 };
+    }
+    if (robotState === 'visual') return { pauseMin: 480, pauseMax: 1050, holdMin: 420, holdMax: 900, x: 12, y: 3.2 };
+    if (robotState === 'thinking') return { pauseMin: 400, pauseMax: 900, holdMin: 450, holdMax: 900, x: 10, y: 6.5 };
+    if (robotState === 'listening') return { pauseMin: 550, pauseMax: 1200, holdMin: 400, holdMax: 850, x: 8.5, y: 5.4 };
+    if (robotState === 'speaking') return { pauseMin: 650, pauseMax: 1450, holdMin: 280, holdMax: 650, x: 6.5, y: 4.0 };
+    if (robotState === 'connecting') return { pauseMin: 550, pauseMax: 1000, holdMin: 320, holdMax: 720, x: 7.5, y: 4.5 };
+    return { pauseMin: 600, pauseMax: 1450, holdMin: 380, holdMax: 850, x: 11, y: 6.8 };
+  }
+
+  function chooseGazeTarget(profile) {
+    // Weighted directions feel less like a metronome than a fixed left-centre-right loop.
+    const points = [
+      [-1.00, -0.22], [1.00, -0.18], [-0.78, 0.48], [0.76, 0.48],
+      [-0.62, -0.82], [0.65, -0.76], [0.05, -1.00], [0.08, 0.90],
+      [-1.00, 0.10], [1.00, 0.12], [-0.28, 0.12], [0.32, -0.16],
+      [0.00, 0.00], [0.00, 0.00]
+    ];
+    let point = points[randomBetween(0, points.length - 1)];
+    const lastX = previousGazeTarget.x / Math.max(1, profile.x);
+    const lastY = previousGazeTarget.y / Math.max(1, profile.y);
+    if (Math.abs(point[0] - lastX) < 0.25 && Math.abs(point[1] - lastY) < 0.3) {
+      point = points[randomBetween(0, points.length - 1)];
+    }
+    return {
+      x: point[0] * profile.x + (Math.random() - 0.5) * 1.2,
+      y: point[1] * profile.y + (Math.random() - 0.5) * 0.8
+    };
+  }
+
+  function clearGazeTimers() {
+    if (gazeTimer !== null) clearTimeout(gazeTimer);
+    if (gazeReturnTimer !== null) clearTimeout(gazeReturnTimer);
+    if (gazeDartTimer !== null) clearTimeout(gazeDartTimer);
+    gazeTimer = gazeReturnTimer = gazeDartTimer = null;
+  }
+
+  function scheduleNextGaze(delayMs = null) {
+    if (pointerGazeTimer !== null || document.hidden || !homeView || homeView.hidden || homeView.classList.contains('is-hidden')) return;
+    clearGazeTimers();
+    const profile = gazeProfile();
+    gazeTimer = window.setTimeout(() => {
+      gazeTimer = null;
+      if (document.hidden || homeView.hidden || homeView.classList.contains('is-hidden')) return;
+      const target = chooseGazeTarget(profile);
+      applyGaze(target.x, target.y);
+
+      // Sometimes make a quick second glance, as if Ozzy noticed something else.
+      if (Math.random() < 0.32) {
+        gazeDartTimer = window.setTimeout(() => {
+          gazeDartTimer = null;
+          if (pointerGazeTimer !== null || document.hidden || homeView.hidden) return;
+          const dart = chooseGazeTarget(profile);
+          applyGaze(dart.x, dart.y);
+        }, randomBetween(190, 360));
+      }
+
+      gazeReturnTimer = window.setTimeout(() => {
+        gazeReturnTimer = null;
+        if (gazeDartTimer !== null) { clearTimeout(gazeDartTimer); gazeDartTimer = null; }
+        applyGaze(0, 0);
+        scheduleNextGaze(randomBetween(profile.pauseMin, profile.pauseMax));
+      }, randomBetween(profile.holdMin, profile.holdMax));
+    }, delayMs === null ? randomBetween(profile.pauseMin, profile.pauseMax) : delayMs);
+  }
+
+  function trackPointerGaze(event) {
+    if (!homeView || homeView.hidden || homeView.classList.contains('is-hidden') || event.pointerType === 'touch') return;
+    if (currentEmotion === 'sleepy') setEmotion('neutral');
+    clearGazeTimers();
+    if (pointerGazeTimer !== null) clearTimeout(pointerGazeTimer);
+    const rect = robotFace.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    // Only a subtle nudge toward the pointer, not a literal screen-wide tracking movement.
+    const nx = clamp((event.clientX - centerX) / Math.max(1, window.innerWidth / 2), -1, 1);
+    const ny = clamp((event.clientY - centerY) / Math.max(1, window.innerHeight / 2), -1, 1);
+    applyGaze(nx * 6.5, ny * 4.5);
+    pointerGazeTimer = window.setTimeout(() => {
+      pointerGazeTimer = null;
+      applyGaze(0, 0);
+      scheduleNextGaze(randomBetween(260, 650));
+    }, 520);
+  }
+
+  function resetGazeToAmbient() {
+    if (pointerGazeTimer !== null) { clearTimeout(pointerGazeTimer); pointerGazeTimer = null; }
+    clearGazeTimers();
+    applyGaze(0, 0);
+    scheduleNextGaze(randomBetween(300, 720));
+  }
+
   function setRobotState(nextState, detail = '') {
     const allowed = new Set(['idle', 'connecting', 'listening', 'thinking', 'speaking', 'visual', 'happy', 'error']);
     if (!allowed.has(nextState)) nextState = 'idle';
+    const activityChanged = robotState !== nextState;
     robotState = nextState;
     if (robotFace) {
       robotFace.dataset.state = nextState;
@@ -479,6 +606,7 @@
       };
       robotFace.setAttribute('aria-label', detail || `${labels[nextState] || 'Ozzy'}; mood: ${currentEmotion}`);
     }
+    if (activityChanged) scheduleNextGaze(randomBetween(170, 430));
   }
 
   function showAdvanced(show) {
@@ -495,6 +623,13 @@
     document.body.style.height = advanced ? 'auto' : '100vh';
     document.body.style.minHeight = advanced ? '100vh' : '100vh';
     document.body.style.padding = advanced ? '24px' : '0';
+    if (advanced) {
+      if (pointerGazeTimer !== null) { clearTimeout(pointerGazeTimer); pointerGazeTimer = null; }
+      clearGazeTimers();
+      applyGaze(0, 0);
+    } else {
+      scheduleNextGaze(randomBetween(220, 520));
+    }
     if (advanced && !memoryPanel.hidden) loadMemories();
   }
 
@@ -1188,6 +1323,17 @@
     if (currentEmotion === 'sleepy') setEmotion('neutral');
     noteUserActivity();
   }, { passive: true });
+  homeView.addEventListener('pointermove', trackPointerGaze, { passive: true });
+  homeView.addEventListener('pointerleave', resetGazeToAmbient, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearGazeTimers();
+      if (pointerGazeTimer !== null) { clearTimeout(pointerGazeTimer); pointerGazeTimer = null; }
+    } else if (!homeView.hidden && !homeView.classList.contains('is-hidden')) {
+      applyGaze(0, 0);
+      scheduleNextGaze(randomBetween(250, 650));
+    }
+  });
   fetch('/api/health', { cache: 'no-store' }).then(response => response.json()).then(health => {
     if (!health.apiKeyConfigured) {
       setStatus('API key missing — configure GEMINI_API_KEY in .env before connecting.', 'error');
@@ -1202,6 +1348,8 @@
     if (speechQuietTimer !== null) clearTimeout(speechQuietTimer);
     if (emotionTimer !== null) clearTimeout(emotionTimer);
     if (idleSleepTimer !== null) clearTimeout(idleSleepTimer);
+    if (pointerGazeTimer !== null) clearTimeout(pointerGazeTimer);
+    clearGazeTimers();
     if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
     if (micStream) micStream.getTracks().forEach(track => track.stop());
     if (visualStream) visualStream.getTracks().forEach(track => track.stop());
