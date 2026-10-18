@@ -226,7 +226,7 @@ function createWindow() {
     show: false,
     title: 'Ozzy',
     autoHideMenuBar: true,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(PROJECT_DIR, 'desktop', 'preload.js'),
       nodeIntegration: false,

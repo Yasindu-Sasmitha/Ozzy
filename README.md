@@ -1,3 +1,11 @@
+## Eyes-only companion home
+
+- Ozzy starts on a full-window black screen showing only two glowing cyan rectangular eyes.
+- The eyes blink subtly while idle, brighten when listening, tilt with a small spark while thinking, pulse while speaking, scan when visual input is active, and briefly squint for a positive reaction.
+- The **Advanced options** button stays hidden until the pointer is over the home window (or keyboard focus reaches it).
+- Advanced options opens the existing voice chat, camera, screen-sharing, and SQLite memory controls. **Back to Ozzy** returns home without disconnecting an active conversation.
+- View switching explicitly sets the display state to avoid the previous blank/white-screen transition. Electron's initial window background is also black to avoid a white flash while loading.
+
 # Ozzy Desktop — Gemini Live Voice, Vision & Persistent Memory
 
 This is the first Electron desktop version of Ozzy, based on the existing working voice-and-vision frontend and Python Gemini Live bridge. It adds:
@@ -11,6 +19,13 @@ This is the first Electron desktop version of Ozzy, based on the existing workin
 - An Electron-native screen/window picker rather than silently selecting a display.
 - Local-only HTTP health/memory endpoints; the static server serves only `index.html`, not `.env` or Python source files.
 - Sensitive-looking credentials and payment-card details are rejected by the memory service.
+
+
+## Companion home screen
+
+The default landing view is an original, Cozmo-inspired expressive robot face built with HTML and CSS (not copied Cozmo artwork). It blinks, glances around in idle mode, changes eye appearance when listening/thinking/visual input is active, and animates its mouth while generated audio plays. Positive-sounding output transcripts may trigger a brief happy expression. Use **Advanced options** to open the existing voice chat, camera, screen-share, and memory workspace; **Back to Ozzy** returns to the face without disconnecting the session.
+
+The face is a visual representation of app state, not a claim that Ozzy has human feelings. Listening/thinking uses a basic local microphone level heuristic; speaking follows queued output audio.
 
 ## 1. Requirements
 
