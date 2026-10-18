@@ -1,0 +1,819 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_soloud/flutter_soloud.dart';
+import 'package:gemini_live/gemini_live.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
+
+import 'screens/settings_screen.dart';
+import 'services/api_key_store.dart';
+import 'services/memory_store.dart';
+import 'widgets/ozzy_face.dart';
+
+const _cyan = Color(0xFF25CFEF);
+const _background = Color(0xFF070B11);
+const _panel = Color(0xFF101822);
+const _modelId = 'gemini-3.8-live';
+const _ozzySystemPrompt = '''
+You are Ozzy, a warm, curious, playful AI robot companion.
+Speak naturally and concisely, with a friendly expressive voice. You are helpful,
+observant, witty without being mean, and honest about what you can and cannot see.
+The user may share live camera frames or a selected image. Use only those available
+images and never pretend to see the room when visual input is off.
+
+MEMORY RULES:
+- You have access to a private SQLite memory store on this device through tools.
+- If the user explicitly asks you to remember something, call remember_fact.
+  The app will ask the user to approve saving it. Never claim it was saved unless
+  the tool result confirms that it was.
+- Use search_memories or list_memories to retrieve approved memories when relevant.
+- If the user asks you to forget something, call forget_memories. The app will show
+  candidate items and ask the user to choose and approve which ones to delete.
+- Never save passwords, API keys, financial credentials, or other secrets.
+- A memory is not available unless a tool result returns it. Do not invent memories.
+
+Mobile limitations: you can receive camera frames and selected gallery images.
+You cannot see the phone's entire screen or share arbitrary mobile apps.
+''';
+
+final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await MemoryStore.instance.initialize();
+  runApp(const OzzyMobileApp());
+}
+
+class OzzyMobileApp extends StatelessWidget {
+  const OzzyMobileApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      navigatorKey: _navigatorKey,
+      title: 'Ozzy',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: _background,
+        colorScheme: ColorScheme.fromSeed(seedColor: _cyan, brightness: Brightness.dark),
+        useMaterial3: true,
+        appBarTheme: const AppBarTheme(backgroundColor: _background, foregroundColor: Colors.white, centerTitle: false),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: _panel,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.white.withValues(alpha: .08))),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: _cyan)),
+        ),
+      ),
+      home: const OzzyHomePage(),
+    );
+  }
+}
+
+class OzzyHomePage extends StatefulWidget {
+  const OzzyHomePage({super.key});
+
+  @override
+  State<OzzyHomePage> createState() => _OzzyHomePageState();
+}
+
+class _OzzyHomePageState extends State<OzzyHomePage> with WidgetsBindingObserver {
+  String? _apiKey;
+  GeminiLiveSessionController? _live;
+  LiveService? _liveService;
+  AudioRecorder? _recorder;
+  StreamSubscription<Uint8List>? _micSubscription;
+  StreamSubscription<Uint8List>? _incomingAudioSubscription;
+  AudioSource? _speakerSource;
+  SoundHandle? _speakerHandle;
+  CameraController? _camera;
+  Timer? _cameraTimer;
+  Timer? _moodTimer;
+  Timer? _idleTimer;
+
+  bool _isConnecting = false;
+  bool _connected = false;
+  bool _showAdvanced = false;
+  bool _frameCaptureInProgress = false;
+  String _status = 'Just hanging out. Tap connect when you are ready.';
+  String _faceState = 'idle';
+  String _mood = 'neutral';
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _chatScrollController = ScrollController();
+  final ImagePicker _imagePicker = ImagePicker();
+  DateTime _lastInteraction = DateTime.now();
+
+  bool get _cameraActive => _camera?.value.isInitialized == true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadApiKey();
+    _startIdleTimer();
+  }
+
+  Future<void> _loadApiKey() async {
+    try {
+      final key = await ApiKeyStore.instance.read();
+      if (mounted) setState(() => _apiKey = key);
+    } catch (error) {
+      if (mounted) setState(() => _status = 'Secure key storage could not be opened: $error');
+    }
+  }
+
+  void _startIdleTimer() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!mounted) return;
+      final idleFor = DateTime.now().difference(_lastInteraction);
+      if (!_connected && idleFor > const Duration(seconds: 85) && _mood == 'neutral' && _faceState == 'idle') {
+        setState(() { _mood = 'sleepy'; _status = 'A little nap would be nice… tap me to wake me up.'; });
+      }
+    });
+  }
+
+  void _markInteraction() {
+    _lastInteraction = DateTime.now();
+    if (_mood == 'sleepy') setState(() { _mood = 'neutral'; _status = _connected ? 'I’m listening.' : 'I’m awake!'; });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Mobile operating systems may pause camera/audio when the app is backgrounded.
+    // Stop visual capture on background to avoid sending frames unexpectedly.
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _stopCamera(updateStatus: false);
+    }
+  }
+
+  Future<void> _openSettings() async {
+    _markInteraction();
+    final result = await Navigator.of(context).push<String?>(
+      MaterialPageRoute(builder: (_) => ApiKeySettingsScreen(initialKey: _apiKey)),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _apiKey = result.isEmpty ? null : result;
+      if (_apiKey == null && _connected) _status = 'Key removed. Disconnect and add a key to reconnect.';
+    });
+  }
+
+  Future<void> _connectOrDisconnect() async {
+    _markInteraction();
+    if (_connected || _isConnecting) {
+      await _disconnect();
+      return;
+    }
+    if (_apiKey == null || _apiKey!.isEmpty) {
+      await _openSettings();
+      if (_apiKey == null || _apiKey!.isEmpty) return;
+    }
+    setState(() { _isConnecting = true; _faceState = 'connecting'; _status = 'Waking up…'; _mood = 'neutral'; });
+    try {
+      _recorder = AudioRecorder();
+      final hasMicPermission = await _recorder!.hasPermission();
+      if (!hasMicPermission) {
+        throw Exception('Microphone permission is required. Enable it in your phone settings and try again.');
+      }
+
+      if (!SoLoud.instance.isInitialized) await SoLoud.instance.init();
+      _speakerSource = SoLoud.instance.setBufferStream(
+        sampleRate: 24000,
+        channels: Channels.mono,
+        format: BufferType.s16le,
+        bufferingType: BufferingType.released,
+      );
+      _speakerHandle = SoLoud.instance.play(_speakerSource!);
+
+      _liveService = LiveService(apiKey: _apiKey!, apiVersion: 'v1beta');
+      final controller = GeminiLiveSessionController(liveService: _liveService!);
+      _live = controller;
+      controller.addListener(_onLiveStateChanged);
+      _incomingAudioSubscription = controller.incomingAudioStream.listen((pcm) {
+        final source = _speakerSource;
+        if (source != null && SoLoud.instance.isInitialized) {
+          try { SoLoud.instance.addAudioDataStream(source, pcm); } catch (_) { /* session may be shutting down */ }
+        }
+      });
+
+      await controller.connect(
+        LiveConnectParameters(
+          model: _modelId,
+          systemInstruction: Content(parts: [Part(text: _ozzySystemPrompt)]),
+          tools: [Tool(functionDeclarations: _memoryFunctionDeclarations())],
+          config: GenerationConfig(
+            responseModalities: [Modality.AUDIO],
+            speechConfig: SpeechConfig.fromLiveVoice(GeminiLiveVoice.puck),
+          ),
+          inputAudioTranscription: AudioTranscriptionConfig(),
+          outputAudioTranscription: AudioTranscriptionConfig(),
+          realtimeInputConfig: RealtimeInputConfig(
+            automaticActivityDetection: AutomaticActivityDetection(disabled: false),
+            activityHandling: ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+            turnCoverage: TurnCoverage.TURN_INCLUDES_ALL_INPUT,
+          ),
+          callbacks: LiveCallbacks(
+            onOpen: () {
+              if (mounted) setState(() { _status = 'Connected. Go ahead — I’m listening.'; _faceState = 'listening'; });
+            },
+            onMessage: _onLiveMessage,
+            onError: (error, stack) {
+              if (mounted) setState(() { _status = 'Gemini error: $error'; _faceState = 'error'; });
+            },
+            onClose: (code, reason) {
+              if (mounted && !_isConnecting) {
+                setState(() { _connected = false; _faceState = 'idle'; _status = 'Connection closed${reason == null ? '' : ': $reason'}'; });
+              }
+            },
+          ),
+        ),
+      );
+
+      final micStream = await _recorder!.startStream(const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: 16000,
+        numChannels: 1,
+        echoCancel: true,
+        noiseSuppress: true,
+      ));
+      _micSubscription = micStream.listen((bytes) {
+        final live = _live;
+        if (live?.isConnected == true) {
+          live!.sendRealtimeAudio(bytes);
+          if (mounted && !_faceState.contains('speaking') && _faceState != 'thinking' && _faceState != 'visual') {
+            // Audio is continuously streamed. The model's server events will switch
+            // the state to thinking/speaking; this keeps the idle eyes attentive.
+            if (_faceState != 'listening') setState(() => _faceState = 'listening');
+          }
+        }
+      }, onError: (Object error) {
+        if (mounted) setState(() { _status = 'Microphone stream error: $error'; _faceState = 'error'; });
+      });
+
+      if (mounted) setState(() { _connected = true; _isConnecting = false; _status = 'Connected. Speak naturally.'; _faceState = 'listening'; });
+    } catch (error) {
+      if (mounted) setState(() { _isConnecting = false; _connected = false; _faceState = 'error'; _status = error.toString().replaceFirst('Exception: ', ''); });
+      await _releaseAudioAndLiveResources();
+    }
+  }
+
+  void _onLiveStateChanged() {
+    final live = _live;
+    if (!mounted || live == null) return;
+    if (live.isModelSpeaking) {
+      if (_faceState != 'speaking') setState(() => _faceState = 'speaking');
+    } else if (_connected && _faceState == 'speaking') {
+      setState(() { _faceState = _cameraActive ? 'visual' : 'listening'; _status = _cameraActive ? 'Looking at the camera.' : 'Ready for your next question.'; });
+    }
+  }
+
+  void _onLiveMessage(LiveServerMessage message) {
+    if (!mounted) return;
+    final content = message.serverContent;
+    if (content?.interrupted == true) {
+      final source = _speakerSource;
+      if (source != null) {
+        try { SoLoud.instance.resetBufferStream(source); } catch (_) { /* buffer already reset */ }
+      }
+      setState(() { _faceState = 'listening'; _status = 'I’m listening — go ahead.'; });
+    }
+    final outputText = content?.outputTranscription?.text;
+    if (outputText != null && outputText.trim().isNotEmpty) _setConversationMood(outputText);
+    final inputText = content?.inputTranscription?.text;
+    if (inputText != null && inputText.trim().isNotEmpty) _markInteraction();
+    final functionCalls = message.toolCall?.functionCalls ?? const <FunctionCall>[];
+    for (final call in functionCalls) {
+      unawaited(_handleMemoryToolCall(call));
+    }
+    if (content?.turnComplete == true && mounted && _live?.isModelSpeaking != true) {
+      setState(() { _status = _cameraActive ? 'Camera active. Ask me about what I see.' : 'Ready for your next question.'; if (!_cameraActive) _faceState = 'listening'; });
+    }
+  }
+
+  void _setConversationMood(String text) {
+    final lower = text.toLowerCase();
+    String? mood;
+    if (RegExp(r'\b(love you|love that|adorable|sweetheart|you are the best|you’re the best)\b').hasMatch(lower)) {
+      mood = 'affection';
+    } else if (RegExp(r'\b(congratulations|amazing|awesome|fantastic|excellent|wonderful|that is great|that’s great|yay|exciting|proud of you)\b').hasMatch(lower) || lower.contains('😄') || lower.contains('🎉')) {
+      mood = 'excited';
+    } else if (RegExp(r'\b(i’m sorry|i am sorry|that sounds hard|that sounds difficult|that must hurt|my condolences|i understand this is hard)\b').hasMatch(lower)) {
+      mood = 'sad';
+    } else if (RegExp(r'\b(really\?|wait, what|no way|unbelievable|didn’t expect|did not expect)\b').hasMatch(lower)) {
+      mood = 'surprised';
+    } else if (RegExp(r'\b(hmm|interesting|i wonder|curious|let’s explore|lets explore)\b').hasMatch(lower)) {
+      mood = 'curious';
+    } else if (RegExp(r'\b(confusing|that does not make sense|that doesn’t make sense|frustrating|annoying)\b').hasMatch(lower)) {
+      mood = 'concerned';
+    } else if (RegExp(r'\b(good night|time for bed|i’m sleepy|i am sleepy|sleep well)\b').hasMatch(lower)) {
+      mood = 'sleepy';
+    }
+    if (mood == null) return;
+    _moodTimer?.cancel();
+    setState(() { _mood = mood!; if (_faceState == 'idle') _faceState = 'listening'; });
+    _moodTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() { _mood = 'neutral'; if (_connected && !_live!.isModelSpeaking) _faceState = _cameraActive ? 'visual' : 'listening'; });
+    });
+  }
+
+  List<FunctionDeclaration> _memoryFunctionDeclarations() => [
+    FunctionDeclaration(
+      name: 'remember_fact',
+      description: 'Ask the user to approve saving one concise, useful memory to Ozzy local memory. Use only when the user explicitly asks you to remember or save something.',
+      parameters: {
+        'type': 'OBJECT',
+        'properties': {
+          'content': {'type': 'STRING', 'description': 'One concise memory, without secrets.'},
+          'category': {'type': 'STRING', 'enum': ['fact', 'preference', 'project', 'goal', 'reminder']},
+        },
+        'required': ['content'],
+      },
+    ),
+    FunctionDeclaration(
+      name: 'search_memories',
+      description: 'Search the approved local memories for relevant facts before answering a question about something the user asked Ozzy to remember.',
+      parameters: {'type': 'OBJECT', 'properties': {'query': {'type': 'STRING'}}, 'required': ['query']},
+    ),
+    FunctionDeclaration(
+      name: 'list_memories',
+      description: 'List approved saved memories when the user asks what Ozzy remembers.',
+      parameters: {'type': 'OBJECT', 'properties': {}},
+    ),
+    FunctionDeclaration(
+      name: 'forget_memories',
+      description: 'Find likely matching saved memories when the user explicitly asks Ozzy to forget something. The user will choose and approve exact items to delete.',
+      parameters: {'type': 'OBJECT', 'properties': {'query': {'type': 'STRING'}}, 'required': ['query']},
+    ),
+  ];
+
+  Future<void> _handleMemoryToolCall(FunctionCall call) async {
+    final callId = call.id;
+    final name = call.name;
+    if (callId == null || name == null || _live == null) return;
+    final args = call.args ?? const <String, dynamic>{};
+    Map<String, dynamic> result;
+    try {
+      switch (name) {
+        case 'remember_fact':
+          final content = (args['content'] ?? '').toString().trim();
+          final category = (args['category'] ?? 'fact').toString();
+          final validation = MemoryStore.validateContent(content);
+          if (validation != null) {
+            result = {'ok': false, 'message': validation};
+            break;
+          }
+          final approved = await _confirmSaveMemory(content, category);
+          if (approved != true) {
+            result = {'ok': false, 'cancelled': true, 'message': 'The user did not approve this memory. Do not claim it was saved.'};
+          } else {
+            result = await MemoryStore.instance.save(content, category: category);
+            if (mounted && result['ok'] == true) setState(() => _status = 'Memory saved locally.');
+          }
+          break;
+        case 'search_memories':
+          final query = (args['query'] ?? '').toString();
+          final matches = await MemoryStore.instance.search(query, limit: 8);
+          result = {'query': query, 'count': matches.length, 'memories': matches.map((m) => m.toMap()).toList()};
+          break;
+        case 'list_memories':
+          final memories = await MemoryStore.instance.list(limit: 20);
+          result = {'count': memories.length, 'memories': memories.map((m) => m.toMap()).toList()};
+          break;
+        case 'forget_memories':
+          final query = (args['query'] ?? '').toString();
+          final matches = await MemoryStore.instance.search(query, limit: 10);
+          if (matches.isEmpty) {
+            result = {'ok': true, 'deleted': 0, 'message': 'No matching memories were found.'};
+            break;
+          }
+          final selectedIds = await _chooseMemoriesToDelete(matches, title: 'Approve memories to forget');
+          if (selectedIds == null || selectedIds.isEmpty) {
+            result = {'ok': false, 'cancelled': true, 'message': 'No memory was deleted.'};
+          } else {
+            final deleted = await MemoryStore.instance.deleteIds(selectedIds);
+            result = {'ok': true, 'deleted': deleted, 'message': 'Deleted $deleted approved memory item(s).'};
+          }
+          break;
+        default:
+          result = {'ok': false, 'message': 'Unknown memory function.'};
+      }
+    } catch (error) {
+      result = {'ok': false, 'message': 'Memory operation failed: $error'};
+    }
+    _live?.sendToolResponses([FunctionResponse(id: callId, name: name, response: result)]);
+  }
+
+  Future<bool?> _confirmSaveMemory(String content, String category) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF111A24),
+        title: const Row(children: [Icon(Icons.bookmark_add_outlined, color: _cyan), SizedBox(width: 10), Expanded(child: Text('Remember this?'))]),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Ozzy wants to save this memory on this device:'),
+          const SizedBox(height: 12),
+          Container(width: double.infinity, padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(12)), child: Text(content)),
+          const SizedBox(height: 10),
+          Text('Category: $category', style: const TextStyle(color: Color(0xFF91A4B8), fontSize: 12)),
+        ]),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Not now')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Save memory'))],
+      ),
+    );
+  }
+
+  Future<List<int>?> _chooseMemoriesToDelete(List<OzzyMemory> memories, {required String title}) {
+    final selected = memories.map((m) => m.id).toSet();
+    return showDialog<List<int>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
+        backgroundColor: const Color(0xFF111A24),
+        title: Text(title),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(shrinkWrap: true, children: [
+            const Text('Choose the exact items to delete. Uncheck anything you want to keep.', style: TextStyle(color: Color(0xFF9BAFC2), fontSize: 12)),
+            const SizedBox(height: 8),
+            ...memories.map((memory) => CheckboxListTile(
+              value: selected.contains(memory.id),
+              controlAffinity: ListTileControlAffinity.leading,
+              activeColor: _cyan,
+              contentPadding: EdgeInsets.zero,
+              title: Text(memory.content, style: const TextStyle(fontSize: 13)),
+              subtitle: Text('${memory.category} · ${memory.createdAt.split('T').first}', style: const TextStyle(fontSize: 11, color: Color(0xFF8195A8))),
+              onChanged: (checked) => setDialogState(() { if (checked == true) { selected.add(memory.id); } else { selected.remove(memory.id); } }),
+            )),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton.tonal(onPressed: selected.isEmpty ? null : () => Navigator.pop(dialogContext, selected.toList()), child: Text('Delete ${selected.length}')),
+        ],
+      )),
+    );
+  }
+
+  Future<void> _openMemoryManager() async {
+    _markInteraction();
+    final memories = await MemoryStore.instance.list(limit: 100);
+    if (!mounted) return;
+    if (memories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No memories saved yet. Say “Ozzy, remember that…” to create one.')));
+      return;
+    }
+    final toDelete = await _chooseMemoriesToDelete(memories, title: 'Ozzy’s saved memories');
+    if (toDelete == null || toDelete.isEmpty) return;
+    final deleted = await MemoryStore.instance.deleteIds(toDelete);
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted $deleted memory item(s).')));
+  }
+
+  Future<void> _sendText() async {
+    _markInteraction();
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _live?.isConnected != true) return;
+    _live!.sendRealtimeText(text);
+    _messageController.clear();
+    setState(() { _faceState = 'thinking'; _status = 'Thinking about that…'; });
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (_chatScrollController.hasClients) {
+      _chatScrollController.animateTo(_chatScrollController.position.maxScrollExtent + 140, duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+    }
+  }
+
+  Future<void> _startCamera() async {
+    _markInteraction();
+    if (_live?.isConnected != true) {
+      setState(() => _status = 'Connect Ozzy before starting the camera.');
+      return;
+    }
+    if (_cameraActive) {
+      await _stopCamera();
+      return;
+    }
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) throw Exception('No camera was found on this device.');
+      final selected = cameras.firstWhere((camera) => camera.lensDirection == CameraLensDirection.back, orElse: () => cameras.first);
+      final camera = CameraController(selected, ResolutionPreset.medium, enableAudio: false, imageFormatGroup: ImageFormatGroup.jpeg);
+      await camera.initialize();
+      if (!mounted) { await camera.dispose(); return; }
+      setState(() { _camera = camera; _faceState = 'visual'; _status = 'Camera active. I can see snapshots about once per second.'; });
+      _cameraTimer?.cancel();
+      _cameraTimer = Timer.periodic(const Duration(milliseconds: 1100), (_) => unawaited(_captureAndSendFrame()));
+      await _captureAndSendFrame();
+    } catch (error) {
+      if (mounted) setState(() { _status = 'Could not start camera: $error'; _faceState = 'error'; });
+    }
+  }
+
+  Future<void> _captureAndSendFrame() async {
+    final camera = _camera;
+    final live = _live;
+    if (_frameCaptureInProgress || camera == null || !camera.value.isInitialized || camera.value.isTakingPicture || live?.isConnected != true) return;
+    _frameCaptureInProgress = true;
+    try {
+      final file = await camera.takePicture();
+      final bytes = await file.readAsBytes();
+      if (bytes.isNotEmpty && _live?.isConnected == true && _camera == camera) {
+        live!.sendRealtimeImage(Uint8List.fromList(bytes), mimeType: 'image/jpeg');
+      }
+      try { await File(file.path).delete(); } catch (_) { /* cache cleanup is best effort */ }
+    } catch (error) {
+      if (mounted && _camera == camera) setState(() => _status = 'Camera frame was skipped: $error');
+    } finally {
+      _frameCaptureInProgress = false;
+    }
+  }
+
+  Future<void> _stopCamera({bool updateStatus = true}) async {
+    _cameraTimer?.cancel();
+    _cameraTimer = null;
+    final camera = _camera;
+    _camera = null;
+    if (camera != null) {
+      try { await camera.dispose(); } catch (_) { /* already disposed by lifecycle */ }
+    }
+    if (mounted && updateStatus) {
+      setState(() { _faceState = _connected ? 'listening' : 'idle'; _status = _connected ? 'Camera off. I’m listening.' : 'Camera off.'; });
+    }
+  }
+
+  Future<void> _sendGalleryImage() async {
+    _markInteraction();
+    if (_live?.isConnected != true) {
+      setState(() => _status = 'Connect Ozzy before sharing an image.');
+      return;
+    }
+    try {
+      final image = await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 82, maxWidth: 1440);
+      if (image == null || !mounted) return;
+      final bytes = await image.readAsBytes();
+      final mimeType = image.path.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+      _live!.sendRealtimeTurn(text: 'Please look carefully at this image and respond to what I ask about it.', imageBytes: bytes, imageMimeType: mimeType);
+      setState(() { _faceState = 'thinking'; _status = 'Looking at the selected image…'; });
+    } catch (error) {
+      if (mounted) setState(() { _status = 'Could not share that image: $error'; _faceState = 'error'; });
+    }
+  }
+
+  Future<void> _disconnect() async {
+    if (!_connected && !_isConnecting && _live == null) return;
+    if (mounted) setState(() { _connected = false; _isConnecting = false; _faceState = 'idle'; _status = 'Disconnected. Tap connect when you want to talk.'; });
+    _cameraTimer?.cancel();
+    _cameraTimer = null;
+    await _stopCamera(updateStatus: false);
+    await _micSubscription?.cancel();
+    _micSubscription = null;
+    try { await _recorder?.stop(); } catch (_) {}
+    try { await _recorder?.dispose(); } catch (_) {}
+    _recorder = null;
+    await _incomingAudioSubscription?.cancel();
+    _incomingAudioSubscription = null;
+    final controller = _live;
+    _live = null;
+    if (controller != null) {
+      controller.removeListener(_onLiveStateChanged);
+      try { await controller.disconnect(); } catch (_) {}
+      controller.dispose();
+    }
+    _liveService = null;
+    if (_speakerHandle != null && SoLoud.instance.isInitialized) {
+      try { SoLoud.instance.stop(_speakerHandle!); } catch (_) {}
+    }
+    _speakerHandle = null;
+    final speaker = _speakerSource;
+    _speakerSource = null;
+    if (speaker != null && SoLoud.instance.isInitialized) {
+      try { SoLoud.instance.setDataIsEnded(speaker); } catch (_) {}
+      try { await SoLoud.instance.disposeSource(speaker); } catch (_) {}
+    }
+  }
+
+  Future<void> _releaseAudioAndLiveResources() async {
+    await _micSubscription?.cancel();
+    _micSubscription = null;
+    try { await _recorder?.stop(); } catch (_) {}
+    try { await _recorder?.dispose(); } catch (_) {}
+    _recorder = null;
+    await _incomingAudioSubscription?.cancel();
+    _incomingAudioSubscription = null;
+    final controller = _live;
+    _live = null;
+    if (controller != null) {
+      controller.removeListener(_onLiveStateChanged);
+      try { await controller.disconnect(); } catch (_) {}
+      controller.dispose();
+    }
+    _liveService = null;
+    final speaker = _speakerSource;
+    _speakerSource = null;
+    if (_speakerHandle != null && SoLoud.instance.isInitialized) {
+      try { SoLoud.instance.stop(_speakerHandle!); } catch (_) {}
+    }
+    _speakerHandle = null;
+    if (speaker != null && SoLoud.instance.isInitialized) {
+      try { SoLoud.instance.setDataIsEnded(speaker); } catch (_) {}
+      try { await SoLoud.instance.disposeSource(speaker); } catch (_) {}
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _idleTimer?.cancel();
+    _moodTimer?.cancel();
+    _messageController.dispose();
+    _chatScrollController.dispose();
+    unawaited(_disconnect());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: _showAdvanced ? _buildAdvanced() : _buildHome(),
+    );
+  }
+
+  Widget _buildHome() {
+    return Scaffold(
+      key: const ValueKey('ozzy-home'),
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _markInteraction,
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(child: OzzyFace(state: _faceState, mood: _mood, onTap: _markInteraction)),
+              Positioned(
+                top: 8, left: 20, right: 14,
+                child: Row(children: [
+                  const Text('OZZY', style: TextStyle(color: Color(0xFF7E9CA9), fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 4)),
+                  const Spacer(),
+                  _connectionBadge(),
+                  const SizedBox(width: 5),
+                  IconButton(onPressed: _openSettings, tooltip: 'API key settings', icon: const Icon(Icons.settings_outlined, color: Color(0xFF6F8998))),
+                ]),
+              ),
+              Positioned(
+                left: 22, right: 22, bottom: 18,
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  AnimatedSwitcher(duration: const Duration(milliseconds: 180), child: Text(_status, key: ValueKey(_status), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF7B93A1), fontSize: 12, height: 1.4))),
+                  const SizedBox(height: 18),
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    _roundAction(Icons.memory_rounded, 'Memories', _openMemoryManager, secondary: true),
+                    const SizedBox(width: 22),
+                    GestureDetector(
+                      onTap: _isConnecting ? null : _connectOrDisconnect,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 68, height: 68,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: _connected ? const Color(0xFF142D36) : _cyan, boxShadow: [BoxShadow(color: _cyan.withValues(alpha: _connected ? .16 : .24), blurRadius: 28, spreadRadius: 1)], border: Border.all(color: _cyan.withValues(alpha: .62))),
+                        child: Center(child: _isConnecting ? const SizedBox(width: 23, height: 23, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black)) : Icon(_connected ? Icons.stop_rounded : Icons.mic_rounded, size: 28, color: _connected ? _cyan : Colors.black)),
+                      ),
+                    ),
+                    const SizedBox(width: 22),
+                    _roundAction(Icons.chat_bubble_outline_rounded, 'Advanced', () { _markInteraction(); setState(() => _showAdvanced = true); }, secondary: true),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text(_connected ? 'TAP TO DISCONNECT' : 'TAP TO TALK', style: const TextStyle(color: Color(0xFF405865), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 2.3)),
+                ]),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _connectionBadge() {
+    final color = _connected ? const Color(0xFF4CE0B8) : (_faceState == 'error' ? const Color(0xFFFF7B85) : const Color(0xFF708290));
+    final label = _isConnecting ? 'CONNECTING' : _connected ? 'CONNECTED' : (_faceState == 'error' ? 'NEEDS ATTENTION' : 'OFFLINE');
+    return Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), decoration: BoxDecoration(color: Colors.white.withValues(alpha: .035), borderRadius: BorderRadius.circular(30), border: Border.all(color: Colors.white.withValues(alpha: .07))), child: Row(mainAxisSize: MainAxisSize.min, children: [Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle, boxShadow: [BoxShadow(color: color.withValues(alpha: .35), blurRadius: 7)])), const SizedBox(width: 7), Text(label, style: TextStyle(color: color, fontSize: 9, letterSpacing: .8, fontWeight: FontWeight.w800))]));
+  }
+
+  Widget _roundAction(IconData icon, String label, VoidCallback onTap, {bool secondary = false}) {
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      IconButton.filledTonal(
+        onPressed: onTap,
+        style: IconButton.styleFrom(backgroundColor: secondary ? Colors.white.withValues(alpha: .055) : _panel, foregroundColor: secondary ? const Color(0xFF91A5B2) : _cyan, fixedSize: const Size(46, 46)),
+        icon: Icon(icon, size: 20),
+      ),
+      const SizedBox(height: 4),
+      Text(label, style: const TextStyle(color: Color(0xFF607582), fontSize: 10, fontWeight: FontWeight.w700)),
+    ]);
+  }
+
+  Widget _buildAdvanced() {
+    final transcripts = _live?.transcripts ?? const <LiveTranscriptItem>[];
+    return Scaffold(
+      key: const ValueKey('ozzy-advanced'),
+      backgroundColor: const Color(0xFF080D14),
+      appBar: AppBar(
+        title: const Text('Ozzy', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.3)),
+        leading: IconButton(tooltip: 'Back to eyes', onPressed: () { _markInteraction(); setState(() => _showAdvanced = false); }, icon: const Icon(Icons.arrow_back_rounded)),
+        actions: [
+          Padding(padding: const EdgeInsets.symmetric(vertical: 14), child: _connectionBadge()),
+          IconButton(onPressed: _openSettings, tooltip: 'API key settings', icon: const Icon(Icons.settings_outlined)),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+            child: Row(children: [
+              Container(width: 40, height: 40, decoration: BoxDecoration(color: _cyan.withValues(alpha: .09), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.smart_toy_outlined, color: _cyan)),
+              const SizedBox(width: 11),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Voice + vision companion', style: TextStyle(fontWeight: FontWeight.w800)), Text(_status, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF8EA2B4), fontSize: 11))])),
+            ]),
+          ),
+          if (_cameraActive)
+            Container(
+              margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+              height: 170,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(16), border: Border.all(color: _cyan.withValues(alpha: .3))),
+              child: Stack(fit: StackFit.expand, children: [
+                CameraPreview(_camera!),
+                Positioned(top: 8, left: 8, child: Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6), decoration: BoxDecoration(color: Colors.red.withValues(alpha: .9), borderRadius: BorderRadius.circular(8)), child: const Text('LIVE CAMERA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)))),
+                Positioned(right: 8, top: 4, child: IconButton.filledTonal(onPressed: _stopCamera, icon: const Icon(Icons.close_rounded, size: 18))),
+              ]),
+            ),
+          Expanded(
+            child: transcripts.isEmpty
+                ? Center(child: Padding(padding: const EdgeInsets.all(30), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.forum_outlined, size: 42, color: _cyan.withValues(alpha: .55)), const SizedBox(height: 14), const Text('Your conversation appears here', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)), const SizedBox(height: 7), const Text('Connect and talk, or type a message. Camera snapshots and selected images can be discussed too.', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF8194A7), height: 1.5, fontSize: 12))])))
+                : ListView.builder(
+                    controller: _chatScrollController,
+                    padding: const EdgeInsets.fromLTRB(14, 6, 14, 14),
+                    itemCount: transcripts.length,
+                    itemBuilder: (context, index) {
+                      final item = transcripts[index];
+                      final isUser = item.role == 'user';
+                      return Align(
+                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .83),
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                          decoration: BoxDecoration(color: isUser ? const Color(0xFF173744) : const Color(0xFF131D28), borderRadius: BorderRadius.only(topLeft: const Radius.circular(16), topRight: const Radius.circular(16), bottomLeft: Radius.circular(isUser ? 16 : 5), bottomRight: Radius.circular(isUser ? 5 : 16)), border: Border.all(color: isUser ? _cyan.withValues(alpha: .12) : Colors.white.withValues(alpha: .04))),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(isUser ? 'YOU' : 'OZZY', style: TextStyle(fontSize: 9, letterSpacing: 1.1, fontWeight: FontWeight.w900, color: isUser ? const Color(0xFF70DDED) : const Color(0xFF91A6B8))), const SizedBox(height: 5), Text(item.text.isEmpty ? (item.imageBytes != null ? 'Shared an image' : '…') : item.text, style: const TextStyle(fontSize: 13, height: 1.45)), if (item.isStreaming) const Padding(padding: EdgeInsets.only(top: 5), child: Text('…', style: TextStyle(color: _cyan))) ]),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          _buildAdvancedActions(),
+          Container(
+            padding: EdgeInsets.fromLTRB(13, 10, 13, max(10.0, MediaQuery.paddingOf(context).bottom + 8).toDouble()),
+            decoration: BoxDecoration(color: const Color(0xFF0D141D), border: Border(top: BorderSide(color: Colors.white.withValues(alpha: .06)))),
+            child: Row(children: [
+              Expanded(child: TextField(controller: _messageController, enabled: _connected, minLines: 1, maxLines: 4, textInputAction: TextInputAction.send, onSubmitted: (_) => _sendText(), decoration: InputDecoration(hintText: _connected ? 'Message Ozzy…' : 'Connect to start chatting', contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12), suffixIcon: IconButton(onPressed: _connected ? _sendText : null, tooltip: 'Send message', icon: const Icon(Icons.arrow_upward_rounded, color: _cyan))))),
+              const SizedBox(width: 8),
+              IconButton.filled(onPressed: _connectOrDisconnect, style: IconButton.styleFrom(backgroundColor: _connected ? const Color(0xFF17313A) : _cyan, foregroundColor: _connected ? _cyan : Colors.black, fixedSize: const Size(48, 48)), icon: Icon(_isConnecting ? Icons.hourglass_top_rounded : _connected ? Icons.stop_rounded : Icons.mic_rounded)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildAdvancedActions() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: [
+          _actionChip(_cameraActive ? Icons.videocam_off_outlined : Icons.videocam_outlined, _cameraActive ? 'Stop camera' : 'Live camera', _startCamera, active: _cameraActive),
+          const SizedBox(width: 7),
+          _actionChip(Icons.image_outlined, 'Choose image', _sendGalleryImage),
+          const SizedBox(width: 7),
+          _actionChip(Icons.bookmarks_outlined, 'Memories', _openMemoryManager),
+          const SizedBox(width: 7),
+          _actionChip(Icons.home_outlined, 'Eyes', () => setState(() => _showAdvanced = false)),
+          if (_connected) ...[const SizedBox(width: 7), _actionChip(Icons.power_settings_new_rounded, 'Disconnect', _disconnect, danger: true)],
+        ]),
+      ),
+    );
+  }
+
+  Widget _actionChip(IconData icon, String label, VoidCallback action, {bool active = false, bool danger = false}) {
+    final tint = danger ? const Color(0xFFFF8B94) : active ? _cyan : const Color(0xFFB4C4D2);
+    return ActionChip(
+      onPressed: action,
+      avatar: Icon(icon, size: 16, color: tint),
+      label: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: tint)),
+      backgroundColor: danger ? const Color(0xFF381B23) : active ? const Color(0xFF15303A) : const Color(0xFF111B26),
+      side: BorderSide(color: tint.withValues(alpha: .18)),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+    );
+  }
+}
