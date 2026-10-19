@@ -7,7 +7,8 @@ This is the Flutter mobile companion for the current Ozzy desktop project. It ke
 - Eyes-only black home screen with animated gaze, blinking, and basic mood expressions.
 - Gemini Live voice chat using model `gemini-3.8-live`.
 - Text chat and streamed input/output transcriptions.
-- Live camera preview; compressed camera snapshots are sent to Gemini approximately every 1.1 seconds while you explicitly enable the camera.
+- Live camera preview with front/back camera switching; compressed camera snapshots are sent to Gemini approximately every 1.1 seconds while enabled.
+- Android screen sharing through the system MediaProjection permission prompt and a visible foreground-service notification. Frames are sent to Gemini at a conservative rate; iOS screen sharing is not included in this patch.
 - Pick an image from the gallery and ask Ozzy about it.
 - Local SQLite memory with `remember_fact`, `search_memories`, `list_memories`, and `forget_memories` tool calls. Saving and deletion require an explicit in-app confirmation.
 - API-key settings screen. The user can enter, reveal/hide, save, or remove a key.
@@ -15,7 +16,7 @@ This is the Flutter mobile companion for the current Ozzy desktop project. It ke
 
 ### Mobile limitation
 
-Mobile supports camera snapshots and images you select. This initial version does **not** capture the entire device screen or share arbitrary other apps; operating systems restrict that capability and it needs a separate native screen-capture workflow. The desktop app retains the desktop screen-share feature.
+Mobile supports camera snapshots, selected gallery images, and Android screen sharing when the user approves the operating-system prompt. Screen sharing has a persistent Android foreground-service notification and stops when the user selects Stop share in Ozzy or Android ends the projection. iOS screen sharing requires a ReplayKit broadcast extension and is not included.
 
 ## Requirements
 
