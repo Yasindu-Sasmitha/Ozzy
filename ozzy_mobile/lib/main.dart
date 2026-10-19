@@ -233,7 +233,7 @@ class _OzzyHomePageState extends State<OzzyHomePage> with WidgetsBindingObserver
             // This guarantees only ONE voice_config oneof alternative is serialized.
             speechConfig: SpeechConfig(
               voiceConfig: VoiceConfig(
-                prebuiltVoiceConfig: PrebuiltVoiceConfig(voiceName: 'Puck'),
+                prebuiltVoiceConfig: PrebuiltVoiceConfig(voiceName: 'Zephyr'),
               ),
             ),
           ),
