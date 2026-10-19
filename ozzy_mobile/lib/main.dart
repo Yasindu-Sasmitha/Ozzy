@@ -103,6 +103,7 @@ class _OzzyHomePageState extends State<OzzyHomePage> with WidgetsBindingObserver
   bool _showAdvanced = false;
   bool _frameCaptureInProgress = false;
   String _status = 'Just hanging out. Tap connect when you are ready.';
+  String? _lastConnectionDiagnostic;
   String _faceState = 'idle';
   String _mood = 'neutral';
   final TextEditingController _messageController = TextEditingController();
@@ -176,6 +177,7 @@ class _OzzyHomePageState extends State<OzzyHomePage> with WidgetsBindingObserver
       await _openSettings();
       if (_apiKey == null || _apiKey!.isEmpty) return;
     }
+    _lastConnectionDiagnostic = null;
     setState(() { _isConnecting = true; _faceState = 'connecting'; _status = 'Waking up…'; _mood = 'neutral'; });
     try {
       _recorder = AudioRecorder();
@@ -193,7 +195,14 @@ class _OzzyHomePageState extends State<OzzyHomePage> with WidgetsBindingObserver
       );
       _speakerHandle = SoLoud.instance.play(_speakerSource!);
 
-      _liveService = LiveService(apiKey: _apiKey!, apiVersion: 'v1beta');
+      // Use the official Live WebSocket API version while diagnosing setup failures.
+      // Log SDK-level connection messages so a timeout doesn't hide the root cause.
+      _liveService = LiveService(
+        apiKey: _apiKey!,
+        apiVersion: 'v1beta',
+        setupTimeout: const Duration(seconds: 30),
+        logger: (message) => debugPrint('[Gemini Live SDK] $message'),
+      );
       final controller = GeminiLiveSessionController(liveService: _liveService!);
       _live = controller;
       controller.addListener(_onLiveStateChanged);
@@ -211,7 +220,13 @@ class _OzzyHomePageState extends State<OzzyHomePage> with WidgetsBindingObserver
           tools: [Tool(functionDeclarations: _memoryFunctionDeclarations())],
           config: GenerationConfig(
             responseModalities: [Modality.AUDIO],
-            speechConfig: SpeechConfig.fromLiveVoice(GeminiLiveVoice.puck),
+            // Construct the prebuilt voice explicitly instead of using fromLiveVoice().
+            // This guarantees only ONE voice_config oneof alternative is serialized.
+            speechConfig: SpeechConfig(
+              voiceConfig: VoiceConfig(
+                prebuiltVoiceConfig: PrebuiltVoiceConfig(voiceName: 'Puck'),
+              ),
+            ),
           ),
           inputAudioTranscription: AudioTranscriptionConfig(),
           outputAudioTranscription: AudioTranscriptionConfig(),
@@ -222,13 +237,19 @@ class _OzzyHomePageState extends State<OzzyHomePage> with WidgetsBindingObserver
           ),
           callbacks: LiveCallbacks(
             onOpen: () {
-              if (mounted) setState(() { _status = 'Connected. Go ahead — I’m listening.'; _faceState = 'listening'; });
+              debugPrint('[Gemini Live] WebSocket opened; waiting for setupComplete.');
+              if (mounted) setState(() { _status = 'WebSocket opened; finishing setup…'; _faceState = 'connecting'; });
             },
             onMessage: _onLiveMessage,
             onError: (error, stack) {
+              // Capture the original server/transport error as well as the SDK trace.
+              _lastConnectionDiagnostic = error.toString();
+              debugPrint('[Gemini Live ERROR] $error');
+              debugPrint('[Gemini Live STACK] $stack');
               if (mounted) setState(() { _status = 'Gemini error: $error'; _faceState = 'error'; });
             },
             onClose: (code, reason) {
+              debugPrint('[Gemini Live CLOSE] code=$code reason=$reason');
               if (mounted && !_isConnecting) {
                 setState(() { _connected = false; _faceState = 'idle'; _status = 'Connection closed${reason == null ? '' : ': $reason'}'; });
               }
@@ -259,8 +280,20 @@ class _OzzyHomePageState extends State<OzzyHomePage> with WidgetsBindingObserver
       });
 
       if (mounted) setState(() { _connected = true; _isConnecting = false; _status = 'Connected. Speak naturally.'; _faceState = 'listening'; });
-    } catch (error) {
-      if (mounted) setState(() { _isConnecting = false; _connected = false; _faceState = 'error'; _status = error.toString().replaceFirst('Exception: ', ''); });
+    } catch (error, stackTrace) {
+      debugPrint('[Ozzy CONNECT CATCH] $error');
+      debugPrint('[Ozzy CONNECT STACK] $stackTrace');
+      final rawError = error.toString().replaceFirst('Exception: ', '');
+      final apiDiagnostic = _lastConnectionDiagnostic;
+      final String userMessage;
+      if (apiDiagnostic != null && apiDiagnostic.isNotEmpty && rawError.toLowerCase().contains('timed out')) {
+        userMessage = 'Gemini rejected or could not finish the session setup: $apiDiagnostic';
+      } else if (rawError.toLowerCase().contains('setup timed out')) {
+        userMessage = 'Gemini Live did not complete setup within 30 seconds. Check your internet connection or VPN/firewall, confirm the API key is valid and has Gemini API access, then try again. Model: $_modelId. If this keeps happening, check whether Google AI Studio reports a key or project restriction.';
+      } else {
+        userMessage = apiDiagnostic == null ? rawError : '$rawError\nGemini also reported: $apiDiagnostic';
+      }
+      if (mounted) setState(() { _isConnecting = false; _connected = false; _faceState = 'error'; _status = userMessage; });
       await _releaseAudioAndLiveResources();
     }
   }
