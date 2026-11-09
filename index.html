@@ -214,7 +214,21 @@
       body.advanced-mode .controls { padding: 16px; }
       body.advanced-mode .visual-panel { padding: 16px; }
     }
-</style>
+
+    .pc-control-panel {
+      margin: 16px 0; padding: 20px; border: 1px solid #243544; border-radius: 18px;
+      background: linear-gradient(145deg, #101a25, #0d141d); color: #eafaff;
+    }
+    .pc-control-header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .pc-control-title { font-size:16px; font-weight:800; letter-spacing:.2px; }
+    .pc-control-state { color:#90a6b6; font-size:12px; }
+    .pc-control-note { margin:10px 0 13px; color:#91a5b4; font-size:12px; line-height:1.55; }
+    .pc-control-actions { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+    .pc-control-actions button { min-width:125px; }
+    .pc-control-log { margin-top:12px; padding:10px 12px; border-radius:10px; background:#081019; color:#8fa5b5; font-size:12px; min-height:38px; line-height:1.45; }
+    .pc-control-log.active { color:#6de4c1; border:1px solid #1c514b; }
+    .pc-control-warning { color:#edc57e; font-size:11px; margin-top:10px; line-height:1.45; }
+  </style>
 </head>
 <body>
   <section id="home-view" class="home-screen" aria-label="Ozzy">
@@ -283,6 +297,22 @@
       <p class="privacy-note">While active, a compressed image is sent to Gemini about once every 1.1 seconds. Camera and screen sharing are off until you start them, and you can stop them at any time. This app does not save frames to local files.</p>
     </section>
 
+    <section class="pc-control-panel" aria-label="Computer control">
+      <div class="pc-control-header">
+        <div>
+          <div class="pc-control-title">🖱️ Ozzy Computer Control</div>
+          <div id="pc-control-state" class="pc-control-state" role="status" aria-live="polite">Off — desktop control is disabled.</div>
+        </div>
+        <div class="pc-control-actions">
+          <button id="pc-control-toggle" class="secondary" type="button" disabled>Enable PC Control</button>
+          <button id="pc-control-stop" class="danger" type="button" disabled>Stop now</button>
+        </div>
+      </div>
+      <p class="pc-control-note">When enabled, Ozzy can inspect your desktop and use the mouse and keyboard for tasks you directly request. It can refresh pages, open DevTools, click, type, and scroll. Control is off by default and resets when you disconnect.</p>
+      <div id="pc-control-log" class="pc-control-log">No computer actions yet.</div>
+      <div class="pc-control-warning">Privacy: screenshots requested by Ozzy are sent to Gemini for analysis. Never ask Ozzy to enter passwords, API keys, payment details, or one-time codes. Use Stop now or move the pointer to the top-left corner for the physical fail-safe.</div>
+    </section>
+
     <section class="controls">
       <div class="buttons">
         <button id="start-btn" class="primary">Connect &amp; Talk</button>
@@ -333,6 +363,10 @@
   const cameraBtn = document.getElementById('camera-btn');
   const screenBtn = document.getElementById('screen-btn');
   const stopVisualsBtn = document.getElementById('stop-visuals-btn');
+  const pcControlBtn = document.getElementById('pc-control-toggle');
+  const pcControlStopBtn = document.getElementById('pc-control-stop');
+  const pcControlState = document.getElementById('pc-control-state');
+  const pcControlLog = document.getElementById('pc-control-log');
   const visualVideo = document.getElementById('visual-video');
   const visualPlaceholder = document.getElementById('visual-placeholder');
   const visualIndicator = document.getElementById('visual-indicator');
@@ -395,6 +429,7 @@
   const visualContext = visualCanvas.getContext('2d', { alpha: false });
   const approvalQueue = [];
   let activeApproval = null;
+  let computerControlEnabled = false;
 
   const EMOTION_NAMES = new Set([
     'neutral', 'happy', 'sad', 'sleepy', 'surprised', 'love', 'curious',
@@ -1131,6 +1166,61 @@
     }
   }
 
+  function renderComputerControlState(message = '') {
+    if (!pcControlBtn || !pcControlStopBtn || !pcControlState) return;
+    pcControlBtn.textContent = computerControlEnabled ? 'Disable PC Control' : 'Enable PC Control';
+    pcControlBtn.classList.toggle('primary', computerControlEnabled);
+    pcControlBtn.classList.toggle('secondary', !computerControlEnabled);
+    pcControlStopBtn.disabled = !isConnected || !computerControlEnabled;
+    pcControlState.textContent = message || (computerControlEnabled
+      ? 'Enabled for this session — Ozzy can use the desktop tools.'
+      : 'Off — desktop control is disabled.');
+  }
+
+  function setComputerControlEnabled(enabled, notifyBackend = true, message = '') {
+    computerControlEnabled = Boolean(enabled);
+    renderComputerControlState(message);
+    if (notifyBackend && isSocketOpen()) {
+      sendJson({ type: 'computer_control', enabled: computerControlEnabled });
+    }
+  }
+
+  function toggleComputerControl() {
+    if (!isConnected || !isSocketOpen()) {
+      setStatus('Connect Ozzy before enabling PC Control.', 'error');
+      return;
+    }
+    if (computerControlEnabled) {
+      setComputerControlEnabled(false, true, 'PC Control disabled. Ozzy can no longer use desktop tools.');
+      setStatus('PC Control is off.', 'live');
+      return;
+    }
+    const approved = window.confirm(
+      'Enable Ozzy PC Control for this session?\n\n' +
+      'Ozzy will be able to capture your desktop when requested and move/click/type/scroll using your mouse and keyboard. ' +
+      'Screenshots requested for analysis are sent to Gemini.\n\n' +
+      'It cannot run shell commands, delete files, or perform admin actions. You can stop it at any time.'
+    );
+    if (!approved) return;
+    setComputerControlEnabled(true, true, 'Enabling PC Control for this session…');
+    setStatus('PC Control enabled. You can ask Ozzy to operate the desktop.', 'live');
+  }
+
+  function stopComputerControl() {
+    setComputerControlEnabled(false, true, 'Stopped. No further PC-control actions will be accepted.');
+    if (pcControlLog) {
+      pcControlLog.textContent = 'Emergency stop requested. Ozzy desktop control is off.';
+      pcControlLog.classList.remove('active');
+    }
+    setStatus('PC Control stopped.', 'live');
+  }
+
+  function showComputerAction(message, ok = true) {
+    if (!pcControlLog) return;
+    pcControlLog.textContent = String(message || 'Computer action updated.');
+    pcControlLog.classList.toggle('active', Boolean(ok));
+  }
+
   function updateButtons(connected) {
     startBtn.disabled = connected || isConnecting;
     stopBtn.disabled = !connected && !isConnecting;
@@ -1139,6 +1229,8 @@
     cameraBtn.disabled = !connected;
     screenBtn.disabled = !connected;
     stopVisualsBtn.disabled = !connected || !visualStream;
+    pcControlBtn.disabled = !connected;
+    pcControlStopBtn.disabled = !connected || !computerControlEnabled;
   }
 
   async function connect() {
@@ -1146,6 +1238,8 @@
     isConnecting = true;
     isConnected = false;
     userRequestedDisconnect = false;
+    computerControlEnabled = false;
+    renderComputerControlState();
     errorState = false;
     pendingEmotion = null;
     setEmotion('neutral');
@@ -1225,6 +1319,13 @@
         case 'memory_approval':
           queueMemoryApproval(message);
           break;
+        case 'computer_control_status':
+          computerControlEnabled = Boolean(message.enabled);
+          renderComputerControlState(message.message || '');
+          break;
+        case 'computer_action':
+          showComputerAction((message.ok ? '✓ ' : '⚠ ' ) + (message.message || message.action || 'Computer action'), Boolean(message.ok));
+          break;
         case 'memory_changed':
           if (!memoryPanel.hidden) loadMemories();
           break;
@@ -1248,6 +1349,8 @@
       updateButtons(false);
       await cleanupAudio();
       ws = null;
+      computerControlEnabled = false;
+      renderComputerControlState('PC Control reset because the connection closed.');
       if (lastError) setStatus(lastError, 'error');
       else if (userRequestedDisconnect) setStatus('Disconnected.');
       else setStatus('Connection closed. Check the Python terminal if this was unexpected.', 'error');
@@ -1255,6 +1358,7 @@
   }
 
   async function disconnect() {
+    if (computerControlEnabled) setComputerControlEnabled(false, true, 'PC Control disabled because the session is disconnecting.');
     userRequestedDisconnect = true;
     isConnecting = false;
     isConnected = false;
@@ -1290,6 +1394,9 @@
     }
   });
 
+  pcControlBtn.addEventListener('click', toggleComputerControl);
+  pcControlStopBtn.addEventListener('click', stopComputerControl);
+  renderComputerControlState();
   startBtn.addEventListener('click', connect);
   stopBtn.addEventListener('click', disconnect);
   advancedOpenBtn.addEventListener('click', () => showAdvanced(true));

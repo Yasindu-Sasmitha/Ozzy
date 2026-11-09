@@ -9,7 +9,20 @@ from typing import Iterable
 
 VALID_CATEGORIES = {"preference", "project", "fact", "other"}
 
+from contextlib import contextmanager
 
+@contextmanager
+def _database():
+    conn = _connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+        
 def default_data_dir() -> Path:
     """Return a per-user data directory, outside the HTTP-served project folder."""
     override = os.getenv("OZZY_DATA_DIR")
@@ -41,7 +54,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def initialize() -> None:
-    with _connect() as conn:
+    with _database() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute(
             """
@@ -94,7 +107,7 @@ def save_memory(content: str, category: str = "fact") -> dict:
     if category not in VALID_CATEGORIES:
         category = "fact"
 
-    with _connect() as conn:
+    with _database() as conn:
         row = conn.execute(
             "SELECT id, category, content, created_at, updated_at FROM memories WHERE category = ? AND content = ? COLLATE NOCASE",
             (category, clean),
@@ -114,7 +127,7 @@ def save_memory(content: str, category: str = "fact") -> dict:
 
 def list_memories(limit: int = 100) -> list[dict]:
     limit = max(1, min(int(limit), 200))
-    with _connect() as conn:
+    with _database() as conn:
         rows = conn.execute(
             "SELECT id, category, content, created_at, updated_at FROM memories ORDER BY updated_at DESC, id DESC LIMIT ?",
             (limit,),
@@ -141,7 +154,7 @@ def search_memories(query: str, limit: int = 8) -> list[dict]:
         + " OR ".join(clauses)
         + " ORDER BY updated_at DESC, id DESC LIMIT ?"
     )
-    with _connect() as conn:
+    with _database() as conn:
         rows = conn.execute(sql, params).fetchall()
     return [dict(row) for row in rows]
 
@@ -158,7 +171,7 @@ def delete_memories(ids: Iterable[int]) -> int:
     if not clean_ids:
         return 0
     placeholders = ",".join("?" for _ in clean_ids)
-    with _connect() as conn:
+    with _database() as conn:
         cur = conn.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", clean_ids)
         return cur.rowcount
 
@@ -175,7 +188,7 @@ def get_memories_by_ids(ids: Iterable[int]) -> list[dict]:
     if not clean_ids:
         return []
     placeholders = ",".join("?" for _ in clean_ids)
-    with _connect() as conn:
+    with _database() as conn:
         rows = conn.execute(
             f"SELECT id, category, content, created_at, updated_at FROM memories WHERE id IN ({placeholders}) ORDER BY updated_at DESC",
             clean_ids,

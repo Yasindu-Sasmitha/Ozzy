@@ -37,7 +37,11 @@ Write-Host 'Building one-file Ozzy backend. This may take several minutes on the
   --collect-all google.genai `
   --collect-all websockets `
   --collect-all dotenv `
+  --collect-all pyautogui `
+  --collect-all pygetwindow `
+  --collect-all PIL `
   --hidden-import memory_service `
+  --hidden-import computer_control `
   server.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed. Check the output above.' }
 
