@@ -182,23 +182,44 @@ def _window_title(window: Any) -> str:
     return str(title or "(untitled window)")[:220]
 
 
+def _foreground_window_handle() -> int:
+    """Return the HWND of the foreground window using the Windows API."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        get_foreground_window = user32.GetForegroundWindow
+        get_foreground_window.argtypes = []
+        get_foreground_window.restype = wintypes.HWND
+        handle = get_foreground_window()
+        return int(handle or 0)
+    except Exception as exc:
+        raise RuntimeError("Could not determine the active Windows window.") from exc
+
+
 def _resolve_window(desktop: Any, window_handle: Any = None):
     if window_handle is None or str(window_handle).strip() == "":
-        active = desktop.get_active()
-        if active is None:
+        # Desktop.get_active() is not consistently exposed by pywinauto's UIA
+        # backend. Resolve the foreground HWND through Win32, then match it to
+        # the UIA top-level windows returned by Desktop.windows().
+        active_handle = _foreground_window_handle()
+        if not active_handle:
             raise RuntimeError("Windows did not report an active application window.")
-        try:
-            window = active.top_level_parent()
-        except Exception:
-            window = active
-        if str(_safe_value(window, "control_type", "Window")) != "Window":
+        for candidate in desktop.windows():
             try:
-                window = window.top_level_parent()
+                if int(candidate.handle) == active_handle:
+                    if not candidate.is_visible():
+                        raise RuntimeError("The active application window is not visible to UI Automation.")
+                    return candidate
+            except RuntimeError:
+                raise
             except Exception:
-                pass
-        if window is None:
-            raise RuntimeError("Could not identify the active application window.")
-        return window
+                continue
+        raise RuntimeError(
+            "The active window is not available in the UI Automation tree. "
+            "Run windows_list_windows and specify a visible window_handle."
+        )
 
     wanted = validate_window_handle(window_handle)
     for window in desktop.windows():
@@ -352,15 +373,35 @@ def _activate(args: dict[str, Any], desktop: Any) -> dict[str, Any]:
     return {"ok": True, "window_handle": str(int(window.handle)), "window_title": _window_title(window), "message": "Application window activated."}
 
 
+def _is_missing_uia_pattern(exc: Exception) -> bool:
+    """Identify pywinauto's explicit 'pattern not supported' failures."""
+    if type(exc).__name__ in {"NoPatternInterfaceError", "PatternNotSupportedError"}:
+        return True
+    return isinstance(exc, ValueError) and "NULL COM pointer" in str(exc)
+
+
+def _activate_with_pointer_or_mouse(control: Any, pattern_action) -> None:
+    """Prefer a semantic UIA pattern; use a bounded physical click if absent."""
+    try:
+        pattern_action()
+    except Exception as exc:
+        if not _is_missing_uia_pattern(exc):
+            raise
+        # The target has already been uniquely matched and checked visible and
+        # enabled. click_input() is the documented pywinauto fallback for UIA
+        # providers that do not implement the requested control pattern.
+        control.click_input()
+
+
 def _activate_control(control: Any, control_type: str) -> None:
-    """Use the UIA interaction pattern appropriate for the selected control."""
+    """Use a supported UIA pattern, falling back only when it is unavailable."""
     if control_type in {"TabItem", "ListItem", "TreeItem", "MenuItem"}:
-        # These UIA controls expose SelectionItem patterns rather than Button.click().
-        control.select()
-    elif control_type == "Button":
-        control.click()  # InvokePattern; preferable to coordinate-based clicking.
-    elif control_type == "Hyperlink":
-        control.invoke()
+        _activate_with_pointer_or_mouse(control, control.select)
+    elif control_type in {"Button", "Hyperlink"}:
+        # Call InvokePattern directly. UIAWrapper.click() also tries SelectionItem
+        # after Invoke fails, which can turn a missing InvokePattern into a second
+        # exception instead of allowing a safe click_input fallback.
+        _activate_with_pointer_or_mouse(control, control.invoke)
     else:
         # Document, Pane and SplitButton may not expose InvokePattern.
         control.click_input()
