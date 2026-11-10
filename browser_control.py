@@ -66,6 +66,17 @@ def _browser_launch_options(browser: str) -> dict[str, Any]:
     return options
 
 
+async def _launch_persistent_context(playwright, browser: str, profile_dir: Path | str):
+    """Launch the selected Playwright engine with a browser-specific persistent profile."""
+    selected_profile = _profile_dir_for_browser(profile_dir, browser)
+    selected_profile.mkdir(parents=True, exist_ok=True)
+    browser_type = _browser_type(playwright, browser)
+    launch_options = _browser_launch_options(browser)
+    return await browser_type.launch_persistent_context(
+        user_data_dir=str(selected_profile), **launch_options
+    )
+
+
 def validate_url(url: Any, *, allow_blank: bool = False) -> str:
     value = str(url or "").strip()
     if allow_blank and not value:
@@ -178,18 +189,10 @@ class BrowserController:
                 "Run .\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt, then restart Ozzy."
             ) from exc
 
-        self.profile_dir.mkdir(parents=True, exist_ok=True)
         try:
             self._playwright = await async_playwright().start()
-            launch_options: dict[str, Any] = {
-                "headless": False,
-                "viewport": None,
-                "args": ["--no-first-run", "--no-default-browser-check"],
-            }
-            if browser != "chromium":
-                launch_options["channel"] = browser
-            self._context = await self._playwright.chromium.launch_persistent_context(
-                user_data_dir=str(self.profile_dir), **launch_options
+            self._context = await _launch_persistent_context(
+                self._playwright, browser, self.profile_dir
             )
             self._context.on("page", self._remember_page)
             self._browser_name = browser

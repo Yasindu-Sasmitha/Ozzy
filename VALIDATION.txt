@@ -1,0 +1,20 @@
+test_browser_tools_are_disabled_by_default (test_browser_control.BrowserControlConsentTests.test_browser_tools_are_disabled_by_default) ... ok
+test_stop_disables_browser_tools (test_browser_control.BrowserControlConsentTests.test_stop_disables_browser_tools) ... ok
+test_blank_new_tab_is_allowed (test_browser_control.BrowserControlValidationTests.test_blank_new_tab_is_allowed) ... ok
+test_blocks_high_impact_click_targets (test_browser_control.BrowserControlValidationTests.test_blocks_high_impact_click_targets) ... ok
+test_browser_allow_list (test_browser_control.BrowserControlValidationTests.test_browser_allow_list) ... ok
+test_detects_sensitive_fields (test_browser_control.BrowserControlValidationTests.test_detects_sensitive_fields) ... ok
+test_firefox_launch_options_do_not_include_chromium_flags (test_browser_control.BrowserControlValidationTests.test_firefox_launch_options_do_not_include_chromium_flags) ... ok
+test_firefox_uses_firefox_engine (test_browser_control.BrowserControlValidationTests.test_firefox_uses_firefox_engine) ... ok
+test_firefox_uses_separate_persistent_profile (test_browser_control.BrowserControlValidationTests.test_firefox_uses_separate_persistent_profile) ... ok
+test_rejects_embedded_url_credentials (test_browser_control.BrowserControlValidationTests.test_rejects_embedded_url_credentials) ... ok
+test_rejects_long_or_invalid_fill_text (test_browser_control.BrowserControlValidationTests.test_rejects_long_or_invalid_fill_text) ... ok
+test_rejects_unsafe_url_schemes (test_browser_control.BrowserControlValidationTests.test_rejects_unsafe_url_schemes) ... ok
+test_validates_http_and_https_urls (test_browser_control.BrowserControlValidationTests.test_validates_http_and_https_urls) ... ok
+test_edge_still_launches_through_chromium_with_channel (test_browser_control.BrowserEngineLaunchTests.test_edge_still_launches_through_chromium_with_channel) ... ok
+test_firefox_launches_through_firefox_engine_and_uses_firefox_profile (test_browser_control.BrowserEngineLaunchTests.test_firefox_launches_through_firefox_engine_and_uses_firefox_profile) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.012s
+
+OK

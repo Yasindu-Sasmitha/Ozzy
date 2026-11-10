@@ -70,6 +70,68 @@ class BrowserControlValidationTests(unittest.TestCase):
         self.assertFalse(browser_control.is_protected_click_target("Read more"))
 
 
+class BrowserEngineLaunchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_firefox_launches_through_firefox_engine_and_uses_firefox_profile(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+
+        class FakeEngine:
+            def __init__(self):
+                self.options = None
+
+            async def launch_persistent_context(self, **kwargs):
+                self.options = kwargs
+                return "firefox-context"
+
+        firefox_engine = FakeEngine()
+        chromium_engine = FakeEngine()
+        playwright = SimpleNamespace(firefox=firefox_engine, chromium=chromium_engine)
+
+        with TemporaryDirectory() as temp_dir:
+            base_profile = Path(temp_dir) / "browser-profile"
+            result = await browser_control._launch_persistent_context(
+                playwright, "firefox", base_profile
+            )
+            self.assertEqual(result, "firefox-context")
+            firefox_profile = base_profile.with_name("browser-profile-firefox")
+            self.assertEqual(firefox_engine.options["user_data_dir"], str(firefox_profile))
+            self.assertTrue(firefox_profile.is_dir())
+            self.assertNotIn("channel", firefox_engine.options)
+            self.assertNotIn("args", firefox_engine.options)
+            self.assertFalse(firefox_engine.options["headless"])
+            self.assertIsNone(firefox_engine.options["viewport"])
+            self.assertIsNone(chromium_engine.options)
+
+    async def test_edge_still_launches_through_chromium_with_channel(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+
+        class FakeEngine:
+            def __init__(self):
+                self.options = None
+
+            async def launch_persistent_context(self, **kwargs):
+                self.options = kwargs
+                return "edge-context"
+
+        firefox_engine = FakeEngine()
+        chromium_engine = FakeEngine()
+        playwright = SimpleNamespace(firefox=firefox_engine, chromium=chromium_engine)
+
+        with TemporaryDirectory() as temp_dir:
+            base_profile = Path(temp_dir) / "browser-profile"
+            result = await browser_control._launch_persistent_context(
+                playwright, "msedge", base_profile
+            )
+            self.assertEqual(result, "edge-context")
+            self.assertEqual(chromium_engine.options["user_data_dir"], str(base_profile))
+            self.assertEqual(chromium_engine.options["channel"], "msedge")
+            self.assertIn("--no-first-run", chromium_engine.options["args"])
+            self.assertIsNone(firefox_engine.options)
+
+
 class BrowserControlConsentTests(unittest.IsolatedAsyncioTestCase):
     async def test_browser_tools_are_disabled_by_default(self):
         controller = browser_control.BrowserController("/tmp/ozzy-browser-test-profile")
