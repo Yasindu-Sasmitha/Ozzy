@@ -45,7 +45,7 @@ For a new target, Ozzy should inspect the active window and capture a screenshot
 
 ## Current limitation and next stage
 
-This is visual mouse/keyboard control. It does not yet include Playwright DOM automation, Chrome DevTools Protocol integration, or Windows UI Automation. Those are the next stages: they will let Ozzy identify browser elements semantically and operate Word/File Explorer controls more reliably than coordinates alone.
+Stage 1 provides visual mouse/keyboard control. Stage 2 adds semantic browser automation with Playwright. Stage 3 adds Windows UI Automation (UIA) for native application controls through pywinauto's stable `uia` backend. Some custom application controls may not expose UIA patterns; use visual PC Control as the fallback.
 
 ## Stage 2: semantic browser automation
 
@@ -70,3 +70,17 @@ To use Playwright-managed Chromium instead:
 ```powershell
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
+
+## Stage 3: Windows application automation
+
+Stage 3 uses `pywinauto` with the Microsoft UI Automation (`uia`) backend. It is additive: Stage 1 visual desktop control and Stage 2 Playwright browser automation remain available. All Stage 3 actions require the same per-session PC Control opt-in and are disabled on Stop now or Live disconnect.
+
+Available tools: `windows_list_windows`, `windows_inspect`, `windows_activate`, `windows_click`, `windows_set_text`, `windows_select`, and `windows_toggle`. Inspection reports accessible control labels, control types, Automation IDs, enabled/visible state and bounds, but does not read Edit values. Controls must be uniquely identified; duplicate matches are rejected. Password/PIN/OTP/verification/credential/payment/banking/security controls and high-impact actions are blocked.
+
+Install the stable pywinauto 0.6.x line into Ozzy's project virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Some applications expose incomplete/custom accessibility trees. UIA may not control elevated apps from a non-elevated Ozzy process; run both at the same privilege level. Word's document surface may be exposed as a `Document` rather than an editable `Edit` control; in that case focus the document surface with UIA and use the existing type_text action for document content.
