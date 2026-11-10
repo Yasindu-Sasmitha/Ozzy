@@ -59,7 +59,13 @@ Install into the same virtual environment used by Ozzy:
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Edge/Chrome channels use those applications when installed. To use Playwright-managed Chromium instead:
+Edge/Chrome channels use those applications when installed. Firefox uses Playwright's patched Firefox build (not the branded Firefox install) and a separate `%APPDATA%\Ozzy\browser-profile-firefox` profile. Install it with:
+
+```powershell
+.\.venv\Scripts\python.exe -m playwright install firefox
+```
+
+To use Playwright-managed Chromium instead:
 
 ```powershell
 .\.venv\Scripts\python.exe -m playwright install chromium

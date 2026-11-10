@@ -141,7 +141,7 @@ The automated tests cover SQLite save, duplicate prevention, keyword lookup, sec
 
 Browser automation uses Playwright's async Python API and is available only while the user has enabled **PC Control** for the current Ozzy session.
 
-- Open a visible managed Microsoft Edge, Google Chrome, or Playwright Chromium browser.
+- Open a visible managed Microsoft Edge, Google Chrome, Playwright Chromium, or Playwright Firefox browser.
 - Use a separate persistent profile at `%APPDATA%\Ozzy\browser-profile` (or the platform's Ozzy user-data directory). It does not reuse or read the user's normal browser profile.
 - Inspect visible page text and controls, click uniquely matched semantic locators (role/name, text, label, placeholder, alt text, title, or test id), fill ordinary text fields, select native dropdowns, toggle checkboxes, navigate, manage tabs, refresh, scroll, and request an in-memory viewport screenshot.
 - Query strings are redacted from URLs returned in inspection/tab summaries. Form field values are not read back by page inspection.
@@ -154,7 +154,13 @@ Install dependencies into Ozzy's active virtual environment:
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-The default `msedge` and `chrome` channels use browsers already installed on Windows. If neither is installed, install Playwright Chromium and request `browser='chromium'`:
+The default `msedge` and `chrome` channels use browsers already installed on Windows. Playwright Firefox is a separately downloaded, patched Firefox build; it does not automate the branded Firefox installation or reuse its normal profile. Request `browser='firefox'` to use it. Install it with:
+
+```powershell
+.\.venv\Scripts\python.exe -m playwright install firefox
+```
+
+If neither Edge nor Chrome is installed, install Playwright Chromium and request `browser='chromium'`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m playwright install chromium

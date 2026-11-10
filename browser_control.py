@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-ALLOWED_BROWSERS = {"msedge", "chrome", "chromium"}
+ALLOWED_BROWSERS = {"msedge", "chrome", "chromium", "firefox"}
 CLICK_LOCATORS = {"role", "text", "label", "placeholder", "alt_text", "title", "test_id"}
 FILL_LOCATORS = {"role", "label", "placeholder"}
 SELECT_LOCATORS = {"role", "label"}
@@ -37,8 +37,33 @@ SENSITIVE_FIELD = re.compile(
 def validate_browser(browser: Any) -> str:
     value = str(browser or "msedge").strip().lower()
     if value not in ALLOWED_BROWSERS:
-        raise ValueError("Browser must be one of: msedge, chrome, chromium.")
+        raise ValueError("Browser must be one of: msedge, chrome, chromium, firefox.")
     return value
+
+
+
+def _browser_type(playwright, browser: str):
+    """Choose the Playwright engine. Firefox requires Playwright's patched build."""
+    return playwright.firefox if browser == "firefox" else playwright.chromium
+
+
+def _profile_dir_for_browser(profile_dir: Path | str, browser: str) -> Path:
+    """Keep Firefox storage separate while preserving the existing Chromium profile path."""
+    base = Path(profile_dir).expanduser().resolve()
+    return base.with_name(f"{base.name}-firefox") if browser == "firefox" else base
+
+
+def _browser_launch_options(browser: str) -> dict[str, Any]:
+    if browser == "firefox":
+        return {"headless": False, "viewport": None}
+    options: dict[str, Any] = {
+        "headless": False,
+        "viewport": None,
+        "args": ["--no-first-run", "--no-default-browser-check"],
+    }
+    if browser != "chromium":
+        options["channel"] = browser
+    return options
 
 
 def validate_url(url: Any, *, allow_blank: bool = False) -> str:
@@ -186,8 +211,14 @@ class BrowserController:
             self._playwright = None
             self._browser_name = None
             detail = str(exc).splitlines()[0][:240]
-            if browser == "chromium":
-                hint = "Install Playwright Chromium with .\\.venv\\Scripts\\python.exe -m playwright install chromium."
+            if browser == "firefox":
+                hint = (
+                    "Install Playwright's Firefox build with "
+                    r".\.venv\Scripts\python.exe -m playwright install firefox. "
+                    "Ozzy uses a separate managed Firefox profile; it does not attach to your normal Firefox profile."
+                )
+            elif browser == "chromium":
+                hint = r"Install Playwright Chromium with .\.venv\Scripts\python.exe -m playwright install chromium."
             else:
                 hint = f"Make sure {browser.title()} is installed, then try browser='chromium' after installing Playwright Chromium."
             raise RuntimeError(f"Could not launch the managed {browser} browser. {hint} Details: {detail}") from exc

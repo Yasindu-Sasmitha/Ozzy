@@ -23,10 +23,32 @@ class BrowserControlValidationTests(unittest.TestCase):
 
     def test_browser_allow_list(self):
         self.assertEqual(browser_control.validate_browser("CHROME"), "chrome")
-        for value in ("firefox", "edge", "powershell"):
+        self.assertEqual(browser_control.validate_browser("FIREFOX"), "firefox")
+        for value in ("edge", "powershell", "webkit"):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     browser_control.validate_browser(value)
+
+    def test_firefox_uses_firefox_engine(self):
+        from types import SimpleNamespace
+        firefox_engine = object()
+        chromium_engine = object()
+        playwright = SimpleNamespace(firefox=firefox_engine, chromium=chromium_engine)
+        self.assertIs(browser_control._browser_type(playwright, "firefox"), firefox_engine)
+        self.assertIs(browser_control._browser_type(playwright, "msedge"), chromium_engine)
+
+    def test_firefox_uses_separate_persistent_profile(self):
+        from pathlib import Path
+        import tempfile
+        base = Path(tempfile.gettempdir()) / "ozzy-test" / "browser-profile"
+        firefox = browser_control._profile_dir_for_browser(base, "firefox")
+        chromium = browser_control._profile_dir_for_browser(base, "msedge")
+        self.assertEqual(firefox, base.with_name("browser-profile-firefox"))
+        self.assertEqual(chromium, base)
+        self.assertNotEqual(firefox, chromium)
+
+    def test_firefox_launch_options_do_not_include_chromium_flags(self):
+        self.assertEqual(browser_control._browser_launch_options("firefox"), {"headless": False, "viewport": None})
 
     def test_rejects_long_or_invalid_fill_text(self):
         with self.assertRaises(ValueError):
