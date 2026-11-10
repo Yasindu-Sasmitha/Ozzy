@@ -167,3 +167,16 @@ If neither Edge nor Chrome is installed, install Playwright Chromium and request
 ```
 
 The packaged backend build collects the Playwright Python driver. The actual browser installation remains a system/browser prerequisite; install Edge/Chrome or Playwright Chromium on the target computer.
+
+## 7. Windows application automation (Stage 3)
+
+Stage 3 adds Windows UI Automation through pywinauto's stable 0.6.x `uia` backend. With PC Control enabled, Ozzy can list open windows, inspect accessible controls, activate a window, click a uniquely identified safe control, set text in ordinary Edit fields, select ComboBox/Tab options, and toggle CheckBox/RadioButton controls. It does not read Edit values, launch or close applications, execute commands, or access arbitrary files.
+
+Install the dependency in the same virtual environment used by Ozzy:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Inspect the target application first. Use the exact control name and, where needed, Automation ID/control type from `windows_inspect`. Applications with custom accessibility trees or elevated privileges may require visual PC Control fallback or matching privilege levels. Word's document canvas may need UIA focus followed by the existing `type_text` action.
+

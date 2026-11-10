@@ -12,3 +12,6 @@ data/
 *.sqlite3-shm
 *.sqlite3-wal
 *.log
+
+# Local patch backups (keep them out of feature commits)
+/backups/

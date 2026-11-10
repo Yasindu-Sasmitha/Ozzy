@@ -41,7 +41,17 @@ Write-Host 'Building one-file Ozzy backend. This may take several minutes on the
   --collect-all pygetwindow `
   --collect-all PIL `
   --collect-all playwright `
+  --collect-all pywinauto `
+  --collect-all comtypes `
+  --hidden-import pythoncom `
+  --hidden-import pywintypes `
+  --hidden-import win32api `
+  --hidden-import win32gui `
+  --hidden-import win32process `
+  --hidden-import win32con `
+  --hidden-import win32com.client `
   --hidden-import browser_control `
+  --hidden-import windows_automation `
   --hidden-import memory_service `
   --hidden-import computer_control `
   server.py
