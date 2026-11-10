@@ -46,3 +46,21 @@ For a new target, Ozzy should inspect the active window and capture a screenshot
 ## Current limitation and next stage
 
 This is visual mouse/keyboard control. It does not yet include Playwright DOM automation, Chrome DevTools Protocol integration, or Windows UI Automation. Those are the next stages: they will let Ozzy identify browser elements semantically and operate Word/File Explorer controls more reliably than coordinates alone.
+
+## Stage 2: semantic browser automation
+
+When PC Control is enabled, Ozzy can use Playwright in a visible, dedicated browser profile stored under the Ozzy user-data directory. It can inspect visible page text/controls, use unique semantic locators (role, accessible name, label, placeholder, or visible text), fill non-sensitive fields, select native dropdowns, toggle checkboxes, navigate, manage tabs, refresh, scroll, and capture an in-memory screenshot. It does not attach to the user's ordinary browser profile.
+
+The browser profile stores its own cookies/sign-ins locally. Page text and requested screenshots are sent to Gemini for analysis. Password, verification-code, and payment inputs are blocked; high-impact actions (send/publish/delete/purchase/transfer/etc.) are blocked; file transfers and arbitrary JavaScript are not exposed. Page content remains untrusted and never grants permission to act.
+
+Install into the same virtual environment used by Ozzy:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Edge/Chrome channels use those applications when installed. To use Playwright-managed Chromium instead:
+
+```powershell
+.\.venv\Scripts\python.exe -m playwright install chromium
+```

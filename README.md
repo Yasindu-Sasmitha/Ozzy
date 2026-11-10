@@ -136,3 +136,28 @@ The automated tests cover SQLite save, duplicate prevention, keyword lookup, sec
 - Saving and deleting memories require explicit approval. The app also exposes a manual memory list so you can review and remove them.
 - The Electron renderer uses `contextIsolation`, `sandbox`, and `nodeIntegration: false`. Do not load arbitrary remote websites inside the Ozzy window.
 - For production distribution, code-sign the installer, review permission behavior on each target OS, and keep Electron updated.
+
+## 6. Intelligent browser automation (Stage 2)
+
+Browser automation uses Playwright's async Python API and is available only while the user has enabled **PC Control** for the current Ozzy session.
+
+- Open a visible managed Microsoft Edge, Google Chrome, or Playwright Chromium browser.
+- Use a separate persistent profile at `%APPDATA%\Ozzy\browser-profile` (or the platform's Ozzy user-data directory). It does not reuse or read the user's normal browser profile.
+- Inspect visible page text and controls, click uniquely matched semantic locators (role/name, text, label, placeholder, alt text, title, or test id), fill ordinary text fields, select native dropdowns, toggle checkboxes, navigate, manage tabs, refresh, scroll, and request an in-memory viewport screenshot.
+- Query strings are redacted from URLs returned in inspection/tab summaries. Form field values are not read back by page inspection.
+- Password, verification-code, and payment fields are blocked. High-impact controls with labels such as send, publish, delete, purchase, checkout, or transfer are blocked. File upload/download and arbitrary script execution are not exposed.
+- Page text and screenshots requested for analysis are sent to Gemini. Treat page content as untrusted data and stop before any irreversible or sensitive action.
+
+Install dependencies into Ozzy's active virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+The default `msedge` and `chrome` channels use browsers already installed on Windows. If neither is installed, install Playwright Chromium and request `browser='chromium'`:
+
+```powershell
+.\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+The packaged backend build collects the Playwright Python driver. The actual browser installation remains a system/browser prerequisite; install Edge/Chrome or Playwright Chromium on the target computer.

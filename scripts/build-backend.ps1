@@ -40,6 +40,8 @@ Write-Host 'Building one-file Ozzy backend. This may take several minutes on the
   --collect-all pyautogui `
   --collect-all pygetwindow `
   --collect-all PIL `
+  --collect-all playwright `
+  --hidden-import browser_control `
   --hidden-import memory_service `
   --hidden-import computer_control `
   server.py

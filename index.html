@@ -1197,9 +1197,10 @@
     }
     const approved = window.confirm(
       'Enable Ozzy PC Control for this session?\n\n' +
-      'Ozzy will be able to capture your desktop when requested and move/click/type/scroll using your mouse and keyboard. ' +
-      'Screenshots requested for analysis are sent to Gemini.\n\n' +
-      'It cannot run shell commands, delete files, or perform admin actions. You can stop it at any time.'
+      'Ozzy can open websites in a separate managed browser profile, read visible page content and interact with page controls. ' +
+      'It can also capture your desktop and use your mouse and keyboard. Page text and requested screenshots are sent to Gemini. ' +
+      'The managed browser keeps its own cookies and sign-ins, separate from your normal browser profile.\n\n' +
+      'Ozzy will not fill password/payment/verification fields or activate send/publish/delete/purchase actions. You can stop it at any time.'
     );
     if (!approved) return;
     setComputerControlEnabled(true, true, 'Enabling PC Control for this session…');
