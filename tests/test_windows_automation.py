@@ -163,7 +163,7 @@ class WindowsAutomationValidationTests(unittest.TestCase):
             def click_input(self): self.called.append("click_input")
 
         cases = {
-            "Button": "click",
+            "Button": "invoke",
             "MenuItem": "select",
             "TabItem": "select",
             "ListItem": "select",
@@ -178,6 +178,60 @@ class WindowsAutomationValidationTests(unittest.TestCase):
                 control = ActionControl()
                 windows_automation._activate_control(control, control_type)
                 self.assertEqual(control.called, [expected])
+
+
+    def test_resolve_active_window_matches_foreground_hwnd(self):
+        class FakeWindow:
+            handle = 4321
+            def is_visible(self): return True
+
+        class FakeDesktop:
+            def windows(self): return [FakeWindow()]
+
+        with patch.object(windows_automation, "_foreground_window_handle", return_value=4321):
+            resolved = windows_automation._resolve_window(FakeDesktop())
+        self.assertEqual(resolved.handle, 4321)
+
+    def test_resolve_active_window_fails_clearly_when_hwnd_is_not_in_uia_tree(self):
+        class FakeDesktop:
+            def windows(self): return []
+
+        with patch.object(windows_automation, "_foreground_window_handle", return_value=9876):
+            with self.assertRaisesRegex(RuntimeError, "not available in the UI Automation tree"):
+                windows_automation._resolve_window(FakeDesktop())
+
+    def test_missing_invoke_or_selection_pattern_falls_back_to_click_input(self):
+        class NoPatternInterfaceError(Exception):
+            pass
+
+        class ActionControl:
+            def __init__(self):
+                self.calls = []
+            def invoke(self):
+                self.calls.append("invoke")
+                raise NoPatternInterfaceError("provider does not support InvokePattern")
+            def select(self):
+                self.calls.append("select")
+                raise NoPatternInterfaceError("provider does not support SelectionItemPattern")
+            def click_input(self):
+                self.calls.append("click_input")
+
+        for control_type, expected_pattern in (("Button", "invoke"), ("Hyperlink", "invoke"), ("MenuItem", "select"), ("ListItem", "select")):
+            with self.subTest(control_type=control_type):
+                control = ActionControl()
+                windows_automation._activate_control(control, control_type)
+                self.assertEqual(control.calls, [expected_pattern, "click_input"])
+
+    def test_non_pattern_activation_error_does_not_trigger_mouse_fallback(self):
+        class ActionControl:
+            def __init__(self): self.mouse_clicked = False
+            def invoke(self): raise RuntimeError("provider disconnected")
+            def click_input(self): self.mouse_clicked = True
+
+        control = ActionControl()
+        with self.assertRaisesRegex(RuntimeError, "provider disconnected"):
+            windows_automation._activate_control(control, "Button")
+        self.assertFalse(control.mouse_clicked)
 
     def test_sensitive_dropdown_options_are_blocked(self):
         original_resolve = windows_automation._resolve_window
