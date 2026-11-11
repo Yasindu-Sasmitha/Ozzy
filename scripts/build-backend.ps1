@@ -52,6 +52,8 @@ Write-Host 'Building one-file Ozzy backend. This may take several minutes on the
   --hidden-import win32com.client `
   --hidden-import browser_control `
   --hidden-import windows_automation `
+  --hidden-import windows_workflows `
+  --hidden-import safe_file_actions `
   --hidden-import memory_service `
   --hidden-import computer_control `
   server.py
