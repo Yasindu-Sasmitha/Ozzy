@@ -49,5 +49,24 @@ class ComputerControlValidationTests(unittest.TestCase):
             computer_control.execute_action("unknown_action", {})
 
 
+
+    def test_screenshot_coordinates_map_to_dpi_scaled_automation_coordinates(self):
+        # Example: a 150% DPI-aware screenshot is larger than PyAutoGUI's logical space.
+        self.assertEqual(
+            computer_control._map_screenshot_to_automation(1500, 900, (3000, 1800), (2000, 1200)),
+            (1000, 600),
+        )
+
+    def test_screenshot_coordinate_mapping_preserves_equal_dimensions(self):
+        self.assertEqual(
+            computer_control._map_screenshot_to_automation(640, 360, (1280, 720), (1280, 720)),
+            (640, 360),
+        )
+
+    def test_screenshot_coordinate_mapping_rejects_out_of_bounds(self):
+        with self.assertRaises(ValueError):
+            computer_control._map_screenshot_to_automation(1280, 0, (1280, 720), (1280, 720))
+
+
 if __name__ == "__main__":
     unittest.main()
