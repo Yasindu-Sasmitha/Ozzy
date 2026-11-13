@@ -193,3 +193,16 @@ Stage 4 adds bounded wait and state-verification helpers on top of Stage 3 UI Au
 
 Use the wait tools between ordinary Stage 3 actions to handle Save/Open dialogs and controls that appear after a tab change or loading step. Ozzy should act one step at a time and verify each result. Wait tools poll every 250 ms, check the existing PC Control stop state during polling, and reject ambiguous matches. File tools require a direct user request, never read file contents and are limited to the current user profile. They skip hidden/system items and symlinks. Deletion, overwrite, move, rename, copy, downloads and execution are not available. No additional Python dependencies are required.
 
+## 9. Multi-step workflow intelligence (Stage 5)
+
+Stage 5 adds `workflow_run`, a bounded coordinator over existing semantic browser, Windows UI Automation, Stage 4 wait/state, and restricted file tools. It does not create another PC Control permission state or bypass existing adapter checks.
+
+- Workflows contain 1 to 8 sequential steps and have a 120-second overall limit (30 seconds per action/verifier).
+- Each state-changing step in a multi-step workflow requires a read-only verifier and an explicit expected field/text assertion. Read-only inspection steps can be used directly. Verifiers can inspect browser pages, the active Windows window, UI Automation state, and allowed file metadata.
+- A failed action, failed assertion, timeout, or disabled PC Control stops the remaining workflow. There are no automatic retries.
+- Progress and final status are shown in the PC Control activity panel. Single actions without an independent check are labelled `completed_unverified`.
+- Raw visual mouse/keyboard actions and field text filling are excluded from orchestrated workflows v1 because their outcomes cannot be independently read back by the existing safety-limited APIs. They remain available through their existing individual tools.
+- Existing high-impact, credential, browser, Windows UIA and file-operation restrictions remain in force. No deletion, sending, publishing, purchasing, administrative or shell-execution actions are added.
+
+See `INSTALL_STAGE5.md` for the supported actions, installation, validation, and rollback instructions. No additional Python dependencies are required.
+
