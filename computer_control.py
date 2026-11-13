@@ -122,6 +122,26 @@ def _coordinate_space_size() -> tuple[int, int]:
     return _screen_size()
 
 
+# MOUSE_PRECISION_V2_POINTER_MARKER
+def _pointer_to_screenshot(
+    x: Any,
+    y: Any,
+    screenshot_size: tuple[int, int],
+    automation_size: tuple[int, int],
+) -> tuple[int, int]:
+    """Convert the live PyAutoGUI pointer position into native screenshot pixels."""
+    screenshot_width, screenshot_height = screenshot_size
+    automation_width, automation_height = automation_size
+    if min(screenshot_width, screenshot_height, automation_width, automation_height) <= 0:
+        raise RuntimeError("Invalid screen dimensions; capture a fresh screenshot and try again.")
+    point_x = round(int(x) * screenshot_width / automation_width)
+    point_y = round(int(y) * screenshot_height / automation_height)
+    return (
+        min(max(point_x, 0), screenshot_width - 1),
+        min(max(point_y, 0), screenshot_height - 1),
+    )
+
+
 def _coordinate(value: Any, name: str, limit: int) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a number.")
@@ -161,6 +181,49 @@ def capture_screen() -> dict[str, Any]:
     original_width, original_height = image.size
     global _LAST_SCREENSHOT_SIZE
     _LAST_SCREENSHOT_SIZE = (int(original_width), int(original_height))
+
+    # Mark the real pointer position in the temporary screenshot sent to Gemini.
+    # PyAutoGUI screenshots do not consistently include the Windows cursor, so
+    # draw a small crosshair ourselves. This image remains in memory only.
+    pointer_screenshot_x = None
+    pointer_screenshot_y = None
+    automation_pointer_x = None
+    automation_pointer_y = None
+    pointer_marker_drawn = False
+    try:
+        automation_width, automation_height = _screen_size()
+        automation_pointer_x, automation_pointer_y = pyautogui.position()
+        pointer_screenshot_x, pointer_screenshot_y = _pointer_to_screenshot(
+            automation_pointer_x,
+            automation_pointer_y,
+            (int(original_width), int(original_height)),
+            (automation_width, automation_height),
+        )
+        from PIL import ImageDraw
+
+        draw = ImageDraw.Draw(image)
+        radius = max(8, round(min(original_width, original_height) / 150))
+        center_x, center_y = pointer_screenshot_x, pointer_screenshot_y
+        # White halo keeps the red marker visible on both light and dark areas.
+        draw.ellipse(
+            (center_x - radius, center_y - radius, center_x + radius, center_y + radius),
+            outline=(255, 255, 255),
+            width=max(4, radius // 3),
+        )
+        draw.ellipse(
+            (center_x - radius, center_y - radius, center_x + radius, center_y + radius),
+            outline=(255, 35, 35),
+            width=max(2, radius // 5),
+        )
+        arm = radius + max(5, radius // 2)
+        draw.line((center_x - arm, center_y, center_x + arm, center_y), fill=(255, 35, 35), width=max(2, radius // 5))
+        draw.line((center_x, center_y - arm, center_x, center_y + arm), fill=(255, 35, 35), width=max(2, radius // 5))
+        draw.ellipse((center_x - 2, center_y - 2, center_x + 2, center_y + 2), fill=(255, 35, 35))
+        pointer_marker_drawn = True
+    except Exception:
+        # Screenshot capture must remain available even if cursor annotation fails.
+        pointer_marker_drawn = False
+
     image.thumbnail((1440, 900))
     output = BytesIO()
     image.convert("RGB").save(output, format="JPEG", quality=72, optimize=True)
@@ -174,6 +237,11 @@ def capture_screen() -> dict[str, Any]:
         "image_height": int(image.height),
         "scale_x": float(original_width / image.width),
         "scale_y": float(original_height / image.height),
+        "pointer_marker_drawn": bool(pointer_marker_drawn),
+        "pointer_x": pointer_screenshot_x,
+        "pointer_y": pointer_screenshot_y,
+        "automation_pointer_x": int(automation_pointer_x) if automation_pointer_x is not None else None,
+        "automation_pointer_y": int(automation_pointer_y) if automation_pointer_y is not None else None,
         "image_bytes": output.getvalue(),
     }
 
@@ -195,7 +263,7 @@ def move_mouse(x: Any, y: Any) -> dict[str, Any]:
     actual_screen_y = round(actual_y * screenshot_size[1] / automation_size[1])
     return {
         "ok": True,
-        "message": f"Moved pointer to screenshot pixel ({target_x}, {target_y}); verified at ({actual_screen_x}, {actual_screen_y}).",
+        "message": f"Pointer reached screenshot pixel ({actual_screen_x}, {actual_screen_y}); coordinate verified, but the intended visual target is not yet verified. Capture a fresh screenshot and inspect the cursor crosshair.",
         "x": target_x, "y": target_y,
         "actual_x": actual_screen_x, "actual_y": actual_screen_y,
         "automation_x": int(actual_x), "automation_y": int(actual_y),
