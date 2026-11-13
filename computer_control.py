@@ -13,6 +13,8 @@ import threading
 from typing import Any
 
 _STOP_REQUESTED = threading.Event()
+# Native pixel dimensions of the most recent screenshot shown to Gemini.
+_LAST_SCREENSHOT_SIZE: tuple[int, int] | None = None
 
 # Exact shortcuts only. Arbitrary key chords are intentionally not accepted.
 ALLOWED_SHORTCUTS = {
@@ -86,9 +88,58 @@ def _pyautogui():
 
 
 def _screen_size() -> tuple[int, int]:
+    """Return the coordinate dimensions exposed by PyAutoGUI on this Windows session."""
     pyautogui = _pyautogui()
     width, height = pyautogui.size()
     return int(width), int(height)
+
+
+def _map_screenshot_to_automation(
+    x: Any,
+    y: Any,
+    screenshot_size: tuple[int, int],
+    automation_size: tuple[int, int],
+) -> tuple[int, int]:
+    """Map native screenshot pixels to PyAutoGUI coordinates (DPI-safe)."""
+    screenshot_width, screenshot_height = screenshot_size
+    automation_width, automation_height = automation_size
+    if min(screenshot_width, screenshot_height, automation_width, automation_height) <= 0:
+        raise RuntimeError("Invalid screen dimensions; capture a fresh screenshot and try again.")
+    source_x = _coordinate(x, "x", screenshot_width)
+    source_y = _coordinate(y, "y", screenshot_height)
+    mapped_x = round(source_x * automation_width / screenshot_width)
+    mapped_y = round(source_y * automation_height / screenshot_height)
+    return (
+        min(max(mapped_x, 0), automation_width - 1),
+        min(max(mapped_y, 0), automation_height - 1),
+    )
+
+
+def _coordinate_space_size() -> tuple[int, int]:
+    """Use the exact screenshot dimensions Gemini was shown, when available."""
+    if _LAST_SCREENSHOT_SIZE is not None:
+        return _LAST_SCREENSHOT_SIZE
+    return _screen_size()
+
+
+# MOUSE_PRECISION_V2_POINTER_MARKER
+def _pointer_to_screenshot(
+    x: Any,
+    y: Any,
+    screenshot_size: tuple[int, int],
+    automation_size: tuple[int, int],
+) -> tuple[int, int]:
+    """Convert the live PyAutoGUI pointer position into native screenshot pixels."""
+    screenshot_width, screenshot_height = screenshot_size
+    automation_width, automation_height = automation_size
+    if min(screenshot_width, screenshot_height, automation_width, automation_height) <= 0:
+        raise RuntimeError("Invalid screen dimensions; capture a fresh screenshot and try again.")
+    point_x = round(int(x) * screenshot_width / automation_width)
+    point_y = round(int(y) * screenshot_height / automation_height)
+    return (
+        min(max(point_x, 0), screenshot_width - 1),
+        min(max(point_y, 0), screenshot_height - 1),
+    )
 
 
 def _coordinate(value: Any, name: str, limit: int) -> int:
@@ -128,6 +179,51 @@ def capture_screen() -> dict[str, Any]:
     pyautogui = _pyautogui()
     image = pyautogui.screenshot()
     original_width, original_height = image.size
+    global _LAST_SCREENSHOT_SIZE
+    _LAST_SCREENSHOT_SIZE = (int(original_width), int(original_height))
+
+    # Mark the real pointer position in the temporary screenshot sent to Gemini.
+    # PyAutoGUI screenshots do not consistently include the Windows cursor, so
+    # draw a small crosshair ourselves. This image remains in memory only.
+    pointer_screenshot_x = None
+    pointer_screenshot_y = None
+    automation_pointer_x = None
+    automation_pointer_y = None
+    pointer_marker_drawn = False
+    try:
+        automation_width, automation_height = _screen_size()
+        automation_pointer_x, automation_pointer_y = pyautogui.position()
+        pointer_screenshot_x, pointer_screenshot_y = _pointer_to_screenshot(
+            automation_pointer_x,
+            automation_pointer_y,
+            (int(original_width), int(original_height)),
+            (automation_width, automation_height),
+        )
+        from PIL import ImageDraw
+
+        draw = ImageDraw.Draw(image)
+        radius = max(8, round(min(original_width, original_height) / 150))
+        center_x, center_y = pointer_screenshot_x, pointer_screenshot_y
+        # White halo keeps the red marker visible on both light and dark areas.
+        draw.ellipse(
+            (center_x - radius, center_y - radius, center_x + radius, center_y + radius),
+            outline=(255, 255, 255),
+            width=max(4, radius // 3),
+        )
+        draw.ellipse(
+            (center_x - radius, center_y - radius, center_x + radius, center_y + radius),
+            outline=(255, 35, 35),
+            width=max(2, radius // 5),
+        )
+        arm = radius + max(5, radius // 2)
+        draw.line((center_x - arm, center_y, center_x + arm, center_y), fill=(255, 35, 35), width=max(2, radius // 5))
+        draw.line((center_x, center_y - arm, center_x, center_y + arm), fill=(255, 35, 35), width=max(2, radius // 5))
+        draw.ellipse((center_x - 2, center_y - 2, center_x + 2, center_y + 2), fill=(255, 35, 35))
+        pointer_marker_drawn = True
+    except Exception:
+        # Screenshot capture must remain available even if cursor annotation fails.
+        pointer_marker_drawn = False
+
     image.thumbnail((1440, 900))
     output = BytesIO()
     image.convert("RGB").save(output, format="JPEG", quality=72, optimize=True)
@@ -141,6 +237,11 @@ def capture_screen() -> dict[str, Any]:
         "image_height": int(image.height),
         "scale_x": float(original_width / image.width),
         "scale_y": float(original_height / image.height),
+        "pointer_marker_drawn": bool(pointer_marker_drawn),
+        "pointer_x": pointer_screenshot_x,
+        "pointer_y": pointer_screenshot_y,
+        "automation_pointer_x": int(automation_pointer_x) if automation_pointer_x is not None else None,
+        "automation_pointer_y": int(automation_pointer_y) if automation_pointer_y is not None else None,
         "image_bytes": output.getvalue(),
     }
 
@@ -148,28 +249,63 @@ def capture_screen() -> dict[str, Any]:
 def move_mouse(x: Any, y: Any) -> dict[str, Any]:
     _check_running()
     pyautogui = _pyautogui()
-    width, height = _screen_size()
-    target_x = _coordinate(x, "x", width)
-    target_y = _coordinate(y, "y", height)
-    pyautogui.moveTo(target_x, target_y, duration=0.18)
+    screenshot_size = _coordinate_space_size()
+    automation_size = _screen_size()
+    target_x = _coordinate(x, "x", screenshot_size[0])
+    target_y = _coordinate(y, "y", screenshot_size[1])
+    automation_x, automation_y = _map_screenshot_to_automation(
+        target_x, target_y, screenshot_size, automation_size
+    )
+    pyautogui.moveTo(automation_x, automation_y, duration=0.18)
     _check_running()
-    return {"ok": True, "message": f"Moved the pointer to ({target_x}, {target_y}).", "x": target_x, "y": target_y}
+    actual_x, actual_y = pyautogui.position()
+    actual_screen_x = round(actual_x * screenshot_size[0] / automation_size[0])
+    actual_screen_y = round(actual_y * screenshot_size[1] / automation_size[1])
+    return {
+        "ok": True,
+        "message": f"Pointer reached screenshot pixel ({actual_screen_x}, {actual_screen_y}); coordinate verified, but the intended visual target is not yet verified. Capture a fresh screenshot and inspect the cursor crosshair.",
+        "x": target_x, "y": target_y,
+        "actual_x": actual_screen_x, "actual_y": actual_screen_y,
+        "automation_x": int(actual_x), "automation_y": int(actual_y),
+    }
 
 
 def click_mouse(x: Any, y: Any, button: str = "left", clicks: int = 1) -> dict[str, Any]:
     _check_running()
     pyautogui = _pyautogui()
-    width, height = _screen_size()
-    target_x = _coordinate(x, "x", width)
-    target_y = _coordinate(y, "y", height)
+    screenshot_size = _coordinate_space_size()
+    automation_size = _screen_size()
+    target_x = _coordinate(x, "x", screenshot_size[0])
+    target_y = _coordinate(y, "y", screenshot_size[1])
     if button not in {"left", "right"}:
         raise ValueError("Only left and right mouse clicks are supported.")
     if isinstance(clicks, bool) or clicks not in {1, 2}:
         raise ValueError("clicks must be 1 or 2.")
-    pyautogui.click(x=target_x, y=target_y, clicks=clicks, interval=0.12, button=button)
+    automation_x, automation_y = _map_screenshot_to_automation(
+        target_x, target_y, screenshot_size, automation_size
+    )
+    # Move first, then verify the actual pointer location before issuing a click.
+    pyautogui.moveTo(automation_x, automation_y, duration=0.12)
     _check_running()
+    actual_x, actual_y = pyautogui.position()
+    if abs(int(actual_x) - automation_x) > 2 or abs(int(actual_y) - automation_y) > 2:
+        raise RuntimeError(
+            "Pointer did not reach the calibrated target; click cancelled for safety. "
+            "Capture a fresh screenshot and retry."
+        )
+    _check_running()
+    pyautogui.click(clicks=clicks, interval=0.12, button=button)
+    _check_running()
+    actual_screen_x = round(actual_x * screenshot_size[0] / automation_size[0])
+    actual_screen_y = round(actual_y * screenshot_size[1] / automation_size[1])
     description = "double-clicked" if clicks == 2 else "clicked"
-    return {"ok": True, "message": f"{description} at ({target_x}, {target_y}) with the {button} button."}
+    return {
+        "ok": True,
+        "message": f"{description} at calibrated screenshot pixel ({actual_screen_x}, {actual_screen_y}) with the {button} button.",
+        "x": target_x, "y": target_y,
+        "actual_x": actual_screen_x, "actual_y": actual_screen_y,
+        "automation_x": int(actual_x), "automation_y": int(actual_y),
+    }
 
 
 def normalize_shortcut(shortcut: str) -> str:
@@ -237,13 +373,17 @@ def type_text(text: Any) -> dict[str, Any]:
 def scroll_screen(x: Any, y: Any, amount: Any) -> dict[str, Any]:
     _check_running()
     pyautogui = _pyautogui()
-    width, height = _screen_size()
-    target_x = _coordinate(x, "x", width)
-    target_y = _coordinate(y, "y", height)
+    screenshot_size = _coordinate_space_size()
+    automation_size = _screen_size()
+    target_x = _coordinate(x, "x", screenshot_size[0])
+    target_y = _coordinate(y, "y", screenshot_size[1])
     if isinstance(amount, bool) or not isinstance(amount, int) or amount == 0 or abs(amount) > 20:
         raise ValueError("amount must be a non-zero integer between -20 and 20.")
-    pyautogui.moveTo(target_x, target_y, duration=0.08)
-    pyautogui.scroll(amount, x=target_x, y=target_y)
+    automation_x, automation_y = _map_screenshot_to_automation(
+        target_x, target_y, screenshot_size, automation_size
+    )
+    pyautogui.moveTo(automation_x, automation_y, duration=0.08)
+    pyautogui.scroll(amount, x=automation_x, y=automation_y)
     _check_running()
     direction = "up" if amount > 0 else "down"
     return {"ok": True, "message": f"Scrolled {direction} by {abs(amount)} step(s)."}

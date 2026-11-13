@@ -84,3 +84,19 @@ Install the stable pywinauto 0.6.x line into Ozzy's project virtual environment:
 ```
 
 Some applications expose incomplete/custom accessibility trees. UIA may not control elevated apps from a non-elevated Ozzy process; run both at the same privilege level. Word's document surface may be exposed as a `Document` rather than an editable `Edit` control; in that case focus the document surface with UIA and use the existing type_text action for document content.
+
+## Stage 4: context-aware desktop workflows
+
+Stage 4 adds bounded UIA workflow helpers and restricted file tools while preserving the Stage 3 safety model:
+
+| Tool | Purpose |
+|---|---|
+| `windows_wait_for_window` | Wait for a visible application window/dialog by title (maximum 15 seconds). |
+| `windows_wait_for_control` | Wait for one exact UIA control to become visible and enabled (maximum 15 seconds). |
+| `windows_get_control_state` | Verify visibility/enabled state and supported checkbox/radio/tab/list/focus state without reading text values. |
+| `files_list_directory` | List visible metadata in Desktop, Documents, Downloads or another user-profile folder; it never reads contents. |
+| `files_create_folder` | Create one new folder in an existing user-profile directory, without merging or overwriting. |
+| `files_create_text_file` | Create a new `.txt` or `.md` file (up to 3,000 characters), without overwriting. |
+
+Use a sequence of small actions: inspect, activate/click, wait for the expected dialog or control, inspect again, then verify state. Waits are cancelled by Stop Now and reject ambiguous matches. File tools require a direct user request, stay inside the current user's profile, skip hidden/system items and symlinks, and never read file contents. Deletion, overwrite, move, rename, copy, downloads and execution are unavailable. No new dependencies are required.
+

@@ -180,3 +180,16 @@ Install the dependency in the same virtual environment used by Ozzy:
 
 Inspect the target application first. Use the exact control name and, where needed, Automation ID/control type from `windows_inspect`. Applications with custom accessibility trees or elevated privileges may require visual PC Control fallback or matching privilege levels. Word's document canvas may need UIA focus followed by the existing `type_text` action.
 
+## 8. Context-aware desktop workflows (Stage 4)
+
+Stage 4 adds bounded wait and state-verification helpers on top of Stage 3 UI Automation:
+
+- `windows_wait_for_window`: wait up to 15 seconds for a visible native window/dialog by exact title or distinctive title fragment.
+- `windows_wait_for_control`: wait up to 15 seconds for an exact control/Automation ID to become visible and enabled.
+- `windows_get_control_state`: verify enabled/visible state, checkbox toggle state, radio/tab/list selection state and keyboard focus when supported.
+- `files_list_directory`: list visible, non-sensitive metadata in Desktop, Documents, Downloads, or another folder inside the user profile.
+- `files_create_folder`: create one new folder inside an existing user-profile folder, without merging or overwriting.
+- `files_create_text_file`: create a new `.txt` or `.md` file (maximum 3,000 characters), never overwriting an existing item.
+
+Use the wait tools between ordinary Stage 3 actions to handle Save/Open dialogs and controls that appear after a tab change or loading step. Ozzy should act one step at a time and verify each result. Wait tools poll every 250 ms, check the existing PC Control stop state during polling, and reject ambiguous matches. File tools require a direct user request, never read file contents and are limited to the current user profile. They skip hidden/system items and symlinks. Deletion, overwrite, move, rename, copy, downloads and execution are not available. No additional Python dependencies are required.
+
