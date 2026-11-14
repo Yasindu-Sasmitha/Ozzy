@@ -1317,6 +1317,21 @@
         case 'visual_status':
           setVisualStatus(message.message || 'Visual status updated', Boolean(message.active));
           break;
+        case 'workflow_template_approval': {
+          const action = String(message.action || 'save');
+          const name = String(message.name || 'Unnamed workflow');
+          const count = Number(message.step_count || 0);
+          const stepsPreview = Array.isArray(message.steps_preview)
+            ? message.steps_preview.map((step, index) => `${index + 1}. ${String(step.label || step.action || 'Step')} [${String(step.action || 'unknown action')}]`).join('\n')
+            : '';
+          const prompt = action === 'delete'
+            ? `Delete the saved workflow "${name}"?\n\nIts local execution history will also be deleted. This will not affect external files, websites, or applications.`
+            : `Save the workflow "${name}" with ${count} step(s) to this device?\n\n${String(message.description || '')}\n\nSteps:\n${stepsPreview}\n\nThe recipe is stored locally and still requires PC Control to run. Do not save credentials or sensitive URL parameters.`;
+          const approved = window.confirm(prompt);
+          sendJson({ type: 'workflow_template_decision', requestId: String(message.requestId || ''), approved });
+          setStatus(approved ? (action === 'delete' ? 'Workflow deletion approved.' : 'Workflow recipe save approved.') : 'Workflow library action cancelled.', 'live');
+          break;
+        }
         case 'memory_approval':
           queueMemoryApproval(message);
           break;
