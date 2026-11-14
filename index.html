@@ -1324,6 +1324,19 @@
           computerControlEnabled = Boolean(message.enabled);
           renderComputerControlState(message.message || '');
           break;
+        case 'workflow_progress': {
+          const step = Number(message.step || 0);
+          const total = Number(message.total_steps || 0);
+          const label = message.label || 'Workflow step';
+          const status = String(message.status || 'running').replaceAll('_', ' ');
+          showComputerAction(`Workflow ${step}/${total} · ${label} — ${status}: ${message.message || ''}`, !['failed', 'verification failed', 'cancelled', 'timed out', 'completed unverified'].includes(status));
+          break;
+        }
+        case 'workflow_complete': {
+          const status = String(message.status || 'finished').replaceAll('_', ' ');
+          showComputerAction(`Workflow ${status} · ${message.completed_steps || 0}/${message.total_steps || 0} verified — ${message.message || ''}`, status === 'completed');
+          break;
+        }
         case 'computer_action':
           showComputerAction((message.ok ? '✓ ' : '⚠ ' ) + (message.message || message.action || 'Computer action'), Boolean(message.ok));
           break;
