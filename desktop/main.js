@@ -17,6 +17,42 @@ let logStream = null;
 let quitting = false;
 const pendingCapturePickers = new Map();
 
+// OZZY_STAGE6_NATIVE_APPROVAL_DIALOG
+ipcMain.handle('ozzy:workflow-library:confirm', async (event, payload = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
+
+  const action = payload && payload.action === 'delete' ? 'delete' : 'save';
+  const rawName = payload && typeof payload.name === 'string' ? payload.name : '';
+  const name = rawName.trim().slice(0, 64) || 'Unnamed workflow';
+  const description = payload && typeof payload.description === 'string'
+    ? payload.description.trim().slice(0, 240)
+    : '';
+  const suppliedSteps = payload && Array.isArray(payload.steps_preview) ? payload.steps_preview : [];
+  const steps = suppliedSteps.slice(0, 8).map((step, index) => {
+    const label = step && typeof step.label === 'string' ? step.label.slice(0, 100) : `Step ${index + 1}`;
+    const tool = step && typeof step.action === 'string' ? step.action.slice(0, 80) : 'unknown action';
+    return `${index + 1}. ${label} [${tool}]`;
+  });
+  const detail = action === 'delete'
+    ? 'Its local execution history will also be deleted. This will not affect external files, websites, or applications.'
+    : [description, steps.length ? `Steps:\n${steps.join('\n')}` : 'No step preview was provided.', 'The recipe is stored locally and still requires PC Control to run.'].filter(Boolean).join('\n\n');
+
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: action === 'delete' ? 'Confirm workflow deletion' : 'Confirm workflow save',
+    message: action === 'delete'
+      ? `Delete the saved workflow "${name}"?`
+      : `Save the workflow "${name}" to this device?`,
+    detail,
+    buttons: [action === 'delete' ? 'Delete workflow' : 'Save workflow', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  return result.response === 0;
+});
+
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function localOrigin(value) {

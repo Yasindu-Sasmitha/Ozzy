@@ -206,3 +206,17 @@ Stage 5 adds `workflow_run`, a bounded coordinator over existing semantic browse
 
 See `INSTALL_STAGE5.md` for the supported actions, installation, validation, and rollback instructions. No additional Python dependencies are required.
 
+## 10. Reusable workflow library (Stage 6)
+
+Stage 6 adds a local library of named, reusable Stage 5 workflow recipes and a small execution history. It uses the existing `ozzy_memory.sqlite3` database; initialization adds two tables without changing saved memories.
+
+- `workflow_template_save`: propose saving a named recipe only when the user explicitly asks. The renderer displays a separate confirmation before the recipe is stored.
+- `workflow_template_list` and `workflow_template_search`: browse saved recipe names, descriptions, step counts and usage metadata.
+- `workflow_template_run`: run a recipe by exact name only after a direct user request. Every run revalidates the stored steps and executes them through Stage 5's existing sequential verifier, action allow-list, timeout and PC Control checks.
+- `workflow_template_history`: inspect recent local run summaries. Up to 50 recipes and the latest 30 run entries per recipe are retained; history stores status/count/duration metadata only, not observed page text or window titles. It is not proof that an external website or application remains in the same state.
+- `workflow_template_delete`: propose deleting one exact recipe. The renderer requests confirmation; its local run history is removed with it.
+
+Recipes are stored on this device only. Saving and deleting require an extra confirmation; PC Control remains a separate per-session permission and is still required to execute a recipe. Credentials, common secret patterns and sensitive URL query parameters are rejected. Saved steps are treated as data and revalidated every time they are loaded. No scheduling, background runs, hidden permissions, raw shell access, deletion of user files, or new OS automation actions are introduced.
+
+See `INSTALL_STAGE6.md` for installation, tests and rollback instructions. No new Python dependencies are required.
+
