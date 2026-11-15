@@ -1319,17 +1319,53 @@
           break;
         case 'workflow_template_approval': {
           const action = String(message.action || 'save');
-          const name = String(message.name || 'Unnamed workflow');
-          const count = Number(message.step_count || 0);
+          const name = String(message.name || 'Unnamed workflow').slice(0, 64);
+          const count = Math.max(0, Math.min(Number(message.step_count || 0), 8));
           const stepsPreview = Array.isArray(message.steps_preview)
-            ? message.steps_preview.map((step, index) => `${index + 1}. ${String(step.label || step.action || 'Step')} [${String(step.action || 'unknown action')}]`).join('\n')
-            : '';
-          const prompt = action === 'delete'
-            ? `Delete the saved workflow "${name}"?\n\nIts local execution history will also be deleted. This will not affect external files, websites, or applications.`
-            : `Save the workflow "${name}" with ${count} step(s) to this device?\n\n${String(message.description || '')}\n\nSteps:\n${stepsPreview}\n\nThe recipe is stored locally and still requires PC Control to run. Do not save credentials or sensitive URL parameters.`;
-          const approved = window.confirm(prompt);
-          sendJson({ type: 'workflow_template_decision', requestId: String(message.requestId || ''), approved });
-          setStatus(approved ? (action === 'delete' ? 'Workflow deletion approved.' : 'Workflow recipe save approved.') : 'Workflow library action cancelled.', 'live');
+            ? message.steps_preview.slice(0, 8).map((step, index) => ({
+                label: String(step.label || step.action || `Step ${index + 1}`).slice(0, 100),
+                action: String(step.action || 'unknown action').slice(0, 80),
+              }))
+            : [];
+          const payload = {
+            action: action === 'delete' ? 'delete' : 'save',
+            name,
+            description: String(message.description || '').slice(0, 240),
+            step_count: count,
+            steps_preview: stepsPreview,
+          };
+          const fallbackSteps = stepsPreview.map((step, index) => `${index + 1}. ${step.label} [${step.action}]`).join('\n');
+          const fallbackPrompt = payload.action === 'delete'
+            ? `Delete the saved workflow "${name}"?\n\nIts local execution history will also be deleted. No external files, websites, or applications will be changed.`
+            : `Save the workflow "${name}" with ${count} step(s) to this device?\n\n${payload.description}\n\nSteps:\n${fallbackSteps}\n\nThe recipe is stored locally and still requires PC Control to run.`;
+
+          setStatus(`Approval required: ${payload.action} workflow "${name}". Review the confirmation dialog.`, 'live');
+          showComputerAction(`Approval required: ${payload.action} workflow "${name}".`, true);
+          let approved = false;
+          try {
+            if (window.ozzyDesktop && typeof window.ozzyDesktop.confirmWorkflowApproval === 'function') {
+              approved = await window.ozzyDesktop.confirmWorkflowApproval(payload);
+            } else {
+              // Browser-mode fallback. The packaged Electron desktop uses the native IPC dialog.
+              approved = window.confirm(fallbackPrompt);
+            }
+          } catch (error) {
+            console.error('Could not display the Stage 6 workflow approval dialog:', error);
+            setStatus('The workflow approval dialog could not be displayed. No change was made.', 'error');
+            approved = false;
+          }
+          const sent = sendJson({
+            type: 'workflow_template_decision',
+            requestId: String(message.requestId || ''),
+            approved: Boolean(approved),
+          });
+          if (sent) {
+            setStatus(approved
+              ? (payload.action === 'delete' ? 'Workflow deletion approved.' : 'Workflow recipe save approved.')
+              : 'Workflow library action cancelled. No changes were made.', 'live');
+          } else {
+            setStatus('Could not send the workflow approval decision. Reconnect Ozzy; no approval was recorded.', 'error');
+          }
           break;
         }
         case 'memory_approval':
