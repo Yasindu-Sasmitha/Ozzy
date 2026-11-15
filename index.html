@@ -1198,7 +1198,8 @@
     const approved = window.confirm(
       'Enable Ozzy PC Control for this session?\n\n' +
       'Ozzy can open websites in a separate managed browser profile, read visible page content and interact with page controls. ' +
-      'It can also inspect and operate ordinary controls in Windows applications such as Word and File Explorer using UI Automation, and use your mouse and keyboard. Page text and requested screenshots are sent to Gemini. ' +
+      'It can also inspect and operate ordinary controls in Windows applications such as Word and File Explorer using UI Automation, and use your mouse and keyboard. ' +
+      'When Word, Excel or PowerPoint is already open, it can inspect or edit the active document, workbook or presentation. Requested document excerpts, cell values and slide text are sent to Gemini; creating a new Office file requires a separate confirmation. ' +
       'The managed browser keeps its own cookies and sign-ins, separate from your normal browser profile.\n\n' +
       'Ozzy will not fill password/payment/verification fields or activate send/publish/delete/purchase actions. You can stop it at any time.'
     );
@@ -1317,6 +1318,36 @@
         case 'visual_status':
           setVisualStatus(message.message || 'Visual status updated', Boolean(message.active));
           break;
+        case 'office_save_approval': {
+          const requestId = String(message.requestId || '');
+          const applicationKey = String(message.application || '').slice(0, 20);
+          const applicationLabel = String(message.application_label || 'Microsoft Office').slice(0, 40);
+          const filePath = String(message.file_path || '').slice(0, 500);
+          const sourceName = String(message.source_name || 'Active Office document').slice(0, 180);
+          const payload = { application: applicationKey, application_label: applicationLabel, file_path: filePath, source_name: sourceName };
+          const prompt = `Create a new ${applicationLabel} file from "${sourceName}" at this location?\n\n${filePath}\n\nNo existing file will be overwritten. For Word, the active document will switch to this new path; Excel and PowerPoint create a copy.`;
+          setStatus('Approval required: create a new Office file. Review the confirmation dialog.', 'live');
+          showComputerAction(`Approval required: save ${sourceName} as a new ${applicationLabel} file ${filePath}`, true);
+          let approved = false;
+          try {
+            if (window.ozzyDesktop && typeof window.ozzyDesktop.confirmOfficeSave === 'function') {
+              approved = await window.ozzyDesktop.confirmOfficeSave(payload);
+            } else {
+              approved = window.confirm(prompt);
+            }
+          } catch (error) {
+            console.error('Could not display the Office save approval dialog:', error);
+            setStatus('The Office save approval dialog could not be displayed. No file was created.', 'error');
+            approved = false;
+          }
+          const sent = sendJson({ type: 'office_save_decision', requestId, approved: Boolean(approved) });
+          if (sent) {
+            setStatus(approved ? 'Office file save approved.' : 'Office file save cancelled. No file was created.', 'live');
+          } else {
+            setStatus('Could not send the Office save decision. Reconnect Ozzy; no approval was recorded.', 'error');
+          }
+          break;
+        }
         case 'workflow_template_approval': {
           const action = String(message.action || 'save');
           const name = String(message.name || 'Unnamed workflow').slice(0, 64);

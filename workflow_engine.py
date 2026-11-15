@@ -30,7 +30,11 @@ WORKFLOW_ACTIONS = {
     "windows_wait_for_window", "windows_wait_for_control",
     "windows_get_control_state", "files_list_directory", "files_create_folder",
     "files_create_text_file",
+    "office_list_running_apps", "word_inspect", "word_insert_text", "word_add_heading",
+    "excel_inspect_range", "excel_write_range", "excel_add_worksheet",
+    "powerpoint_inspect", "powerpoint_add_slide",
 }
+# OZZY_STAGE7_OFFICE_ACTIONS
 
 # Verification calls must be read-only. In particular, a verifier can never
 # click, fill, create, navigate, type, or otherwise mutate the target app.
@@ -38,7 +42,9 @@ VERIFY_ACTIONS = {
     "browser_inspect", "browser_list_tabs", "get_active_window", "windows_list_windows",
     "windows_inspect", "windows_wait_for_window", "windows_wait_for_control",
     "windows_get_control_state", "files_list_directory",
+    "office_list_running_apps", "word_inspect", "excel_inspect_range", "powerpoint_inspect",
 }
+# OZZY_STAGE7_OFFICE_VERIFIERS
 
 _FIELD_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){0,5}$")
 

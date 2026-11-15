@@ -128,6 +128,18 @@ node --check desktop/preload.js
 
 The automated tests cover SQLite save, duplicate prevention, keyword lookup, secret rejection, and deletion. They do not simulate Gemini Live, real microphone input, camera permissions, or the Electron installer; those need a local end-to-end run.
 
+## 11. Office productivity (Stage 7)
+
+Stage 7 adds Microsoft Word, Excel and PowerPoint automation through `pywin32` COM. Office desktop applications must already be running; Ozzy attaches to the active application and does not launch apps or open arbitrary documents.
+
+- Word: inspect a bounded excerpt, append text, and add Heading 1–3. Editing is restricted to macro-free `.docx` files.
+- Excel: inspect up to 200 cell values (bounded response), write a rectangular matrix of literal values (formula-like strings are blocked), and add a new worksheet. Excel events are temporarily suspended around edits and restored to their previous state. This is application-wide for the brief operation, so other open Excel workbooks in that instance are affected temporarily.
+- PowerPoint: inspect bounded slide text and add a title-and-content slide. Editing is restricted to macro-free `.pptx` files.
+- `office_save_new` creates a new `.docx`, standard `.xlsx`, or `.pptx` in Desktop, Documents or OneDrive after a separate native confirmation. Existing files are rejected. Word Save As changes the active document path; Excel and PowerPoint create copies.
+- Office editing actions are available to Stage 5 workflows and Stage 6 saved recipes with the same bounded verification rules. `office_save_new` requires interactive confirmation and is excluded from reusable workflows.
+
+Install/update requirements with `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`. See `INSTALL_STAGE7.md` for testing, limitations and rollback.
+
 ## Privacy and security notes
 
 - SQLite is local to the current device in this first version; this version does not sync memories to a future mobile app.
