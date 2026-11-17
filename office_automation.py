@@ -148,16 +148,53 @@ def _writable(obj, app_label: str) -> None:
         raise OfficeAutomationError(f"Could not verify whether the active {app_label} is writable. No change was made.") from exc
 
 
+def _inspect_only_error(app_key: str) -> OfficeAutomationError:
+    label = {"word": "Word .docx", "excel": "Excel .xlsx", "powerpoint": "PowerPoint .pptx"}.get(app_key, "Office")
+    extension = {"word": "docx", "excel": "xlsx", "powerpoint": "pptx"}.get(app_key, "")
+    return OfficeAutomationError(
+        f"Editing is limited to macro-free {label} files in this release. "
+        f"This active file format is inspect-only; save a separate .{extension} copy manually first."
+    )
+
+
+def _require_macro_free_powerpoint(presentation: Any) -> None:
+    """PowerPoint's Presentation object has no FileFormat property, so verify via its file name.
+
+    A saved ``.pptx`` cannot contain VBA, so the extension is sufficient. An unsaved new
+    presentation has no extension; it is accepted only when PowerPoint confirms it has no VBA project.
+    """
+    try:
+        full_name = str(presentation.FullName or presentation.Name or "")
+    except Exception as exc:
+        raise OfficeAutomationError("Could not verify the active PowerPoint .pptx file format. No change was made.") from exc
+    suffix = os.path.splitext(full_name.replace("\\", "/").rsplit("/", 1)[-1])[1].lower()
+    if suffix == ".pptx":
+        return
+    if suffix:
+        raise _inspect_only_error("powerpoint")  # .ppt, .pptm, .potx, .ppsx, ...
+    try:
+        has_vba = bool(presentation.HasVBProject)
+    except Exception as exc:
+        raise OfficeAutomationError("Could not verify the active PowerPoint .pptx file format. No change was made.") from exc
+    if has_vba:
+        raise _inspect_only_error("powerpoint")
+
+
 def _require_macro_free_format(app_key: str, office_item: Any) -> None:
     """Restrict edits to the macro-free Office Open XML formats supported here."""
-    allowed_formats = {"word": 16, "excel": 51, "powerpoint": 24}
-    label = {"word": "Word .docx", "excel": "Excel .xlsx", "powerpoint": "PowerPoint .pptx"}.get(app_key, "Office")
+    if app_key == "powerpoint":
+        _require_macro_free_powerpoint(office_item)
+        return
+    # Word reports a normal .docx as wdFormatXMLDocument (12); 16 is wdFormatDocumentDefault.
+    # 13 (.docm), 0 (.doc) and other formats stay inspect-only. Excel: 51 = xlOpenXMLWorkbook (.xlsx).
+    allowed_formats = {"word": {12, 16}, "excel": {51}}
+    label = {"word": "Word .docx", "excel": "Excel .xlsx"}.get(app_key, "Office")
     try:
         file_format = int(office_item.SaveFormat if app_key == "word" else office_item.FileFormat)
     except Exception as exc:
         raise OfficeAutomationError(f"Could not verify the active {label} file format. No change was made.") from exc
-    if file_format != allowed_formats[app_key]:
-        raise OfficeAutomationError(f"Editing is limited to macro-free {label} files in this release. This active file format is inspect-only; save a separate .{ {'word':'docx','excel':'xlsx','powerpoint':'pptx'}[app_key] } copy manually first.")
+    if file_format not in allowed_formats.get(app_key, set()):
+        raise _inspect_only_error(app_key)
 
 
 @contextmanager
@@ -614,8 +651,7 @@ def _office_save_new(args: dict[str, Any]) -> dict[str, Any]:
             presentation = _active_presentation(app)
             _check_expected_active_identity(presentation, args.get("_expected_active_identity"))
             _writable(presentation, "PowerPoint presentation")
-            if int(presentation.FileFormat) != 24:
-                raise OfficeAutomationError("Only standard .pptx presentations can be copied by this first release. Save macro-enabled or legacy presentations manually in PowerPoint.")
+            _require_macro_free_format("powerpoint", presentation)
             presentation.SaveCopyAs(str(path), 24, False)  # ppSaveAsOpenXMLPresentation
         if not path.is_file() or path.stat().st_size <= 0:
             raise OfficeAutomationError("Office returned from Save As, but the new file could not be verified on disk.")

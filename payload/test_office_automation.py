@@ -120,9 +120,47 @@ class OfficeValidationTests(unittest.TestCase):
         with self.assertRaises(office.OfficeAutomationError):
             office._require_macro_free_format("excel", ExcelBook())
         class PowerPointDeck:
-            FileFormat = 25
+            FullName = r"C:\Users\Demo\Documents\Deck.pptm"
         with self.assertRaises(office.OfficeAutomationError):
             office._require_macro_free_format("powerpoint", PowerPointDeck())
+
+    def test_standard_open_xml_documents_are_editable(self):
+        # Word reports a normal .docx as wdFormatXMLDocument (12); 16 is wdFormatDocumentDefault.
+        for save_format in (12, 16):
+            class WordDoc:
+                SaveFormat = save_format
+            office._require_macro_free_format("word", WordDoc())
+
+        class ExcelBook:
+            FileFormat = 51
+        office._require_macro_free_format("excel", ExcelBook())
+
+        # PowerPoint's Presentation has no FileFormat property; the file name is used instead.
+        class SavedDeck:
+            FullName = r"C:\Users\Demo\Documents\Deck.PPTX"
+        office._require_macro_free_format("powerpoint", SavedDeck())
+
+    def test_powerpoint_legacy_and_unverifiable_decks_fail_closed(self):
+        class LegacyDeck:
+            FullName = r"C:\Users\Demo\Documents\Old.ppt"
+        with self.assertRaises(office.OfficeAutomationError):
+            office._require_macro_free_format("powerpoint", LegacyDeck())
+
+        class UnsavedCleanDeck:
+            FullName = "Presentation1"
+            HasVBProject = False
+        office._require_macro_free_format("powerpoint", UnsavedCleanDeck())
+
+        class UnsavedMacroDeck:
+            FullName = "Presentation1"
+            HasVBProject = True
+        with self.assertRaises(office.OfficeAutomationError):
+            office._require_macro_free_format("powerpoint", UnsavedMacroDeck())
+
+        class UnsavedUnknownDeck:
+            FullName = "Presentation1"
+        with self.assertRaises(office.OfficeAutomationError):
+            office._require_macro_free_format("powerpoint", UnsavedUnknownDeck())
 
     def test_excel_events_restore_previous_state_even_after_failure(self):
         class ExcelApp:
