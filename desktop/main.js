@@ -53,6 +53,29 @@ ipcMain.handle('ozzy:workflow-library:confirm', async (event, payload = {}) => {
 });
 
 
+// OZZY_STAGE7_OFFICE_SAVE_APPROVAL
+ipcMain.handle('ozzy:office:confirm-save', async (event, payload = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
+  const labels = { word: 'Microsoft Word', excel: 'Microsoft Excel', powerpoint: 'Microsoft PowerPoint' };
+  const application = labels[payload && payload.application] || 'Microsoft Office';
+  const filePath = payload && typeof payload.file_path === 'string' ? payload.file_path.trim().slice(0, 500) : '';
+  const sourceName = payload && typeof payload.source_name === 'string'
+    ? payload.source_name.trim().slice(0, 180)
+    : 'Active Office document';
+  if (!filePath || !path.isAbsolute(filePath)) return false;
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: 'Confirm new Office file',
+    message: `Create a new ${application} file?`,
+    detail: `Source: ${sourceName}\nDestination:\n${filePath}\n\nNo existing file will be overwritten. Word's active document will switch to this new path; Excel and PowerPoint create a copy.`,
+    buttons: ['Save new file', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  return result.response === 0;
+});
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function localOrigin(value) {

@@ -52,6 +52,9 @@ Write-Host 'Building one-file Ozzy backend. This may take several minutes on the
   --hidden-import win32com.client `
   --hidden-import browser_control `
   --hidden-import windows_automation `
+  --hidden-import office_automation `
+  --hidden-import win32com.client.dynamic `
+  --hidden-import win32com.client.gencache `
   --hidden-import windows_workflows `
   --hidden-import safe_file_actions `
   --hidden-import memory_service `
