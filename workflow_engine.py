@@ -33,6 +33,11 @@ WORKFLOW_ACTIONS = {
     "office_list_running_apps", "word_inspect", "word_insert_text", "word_add_heading",
     "excel_inspect_range", "excel_write_range", "excel_add_worksheet",
     "powerpoint_inspect", "powerpoint_add_slide",
+    # Stage 8: formatting, formulas and switching between already-open documents.
+    # office_open_document and office_save_new need interactive approval and are not workflow actions.
+    "word_format_text", "excel_format_range", "excel_set_formula",
+    "powerpoint_format_text", "powerpoint_set_slide_background",
+    "office_list_open_documents", "office_activate_document",
 }
 # OZZY_STAGE7_OFFICE_ACTIONS
 
@@ -43,6 +48,7 @@ VERIFY_ACTIONS = {
     "windows_inspect", "windows_wait_for_window", "windows_wait_for_control",
     "windows_get_control_state", "files_list_directory",
     "office_list_running_apps", "word_inspect", "excel_inspect_range", "powerpoint_inspect",
+    "office_list_open_documents",
 }
 # OZZY_STAGE7_OFFICE_VERIFIERS
 

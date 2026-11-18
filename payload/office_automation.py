@@ -64,8 +64,12 @@ def _require_windows() -> None:
         raise OfficeAutomationError("Microsoft Office COM automation is available only on Windows 10/11.")
 
 
-def _connect(progid: str):
-    """Attach to an existing Office application; Dispatch/CreateObject is intentionally not used."""
+def _connect(progid: str, allow_launch: bool = False):
+    """Attach to an existing Office application.
+
+    Starting an application is refused unless ``allow_launch`` is set, which only the
+    separately approved ``office_open_document`` action does.
+    """
     try:
         from win32com.client import GetActiveObject
     except ImportError as exc:
@@ -76,12 +80,31 @@ def _connect(progid: str):
         return GetActiveObject(progid)
     except Exception as exc:
         app_name = next((name.title() for name, value in APP_PROGIDS.items() if value == progid), progid)
-        raise OfficeAutomationError(
-            f"{app_name} is not running or has no active COM session. Open the application and the document first."
-        ) from exc
+        if not allow_launch:
+            raise OfficeAutomationError(
+                f"{app_name} is not running or has no active COM session. Open the application and the document first."
+            ) from exc
+        try:
+            from win32com.client import Dispatch
+            started = Dispatch(progid)
+            try:
+                started.Visible = True
+            except Exception:
+                pass
+            return started
+        except Exception as launch_error:
+            raise OfficeAutomationError(f"{app_name} is not running and could not be started.") from launch_error
 
 
-def _with_app(app_key: str, callback: Callable[[Any], dict[str, Any]]) -> dict[str, Any]:
+def _com_flag(obj: Any, name: str) -> bool:
+    """Read a boolean COM property, treating an unreadable value as False."""
+    try:
+        return bool(getattr(obj, name))
+    except Exception:
+        return False
+
+
+def _with_app(app_key: str, callback: Callable[[Any], dict[str, Any]], *, allow_launch: bool = False) -> dict[str, Any]:
     _check_enabled()
     _require_windows()
     key = str(app_key or "").strip().lower()
@@ -95,7 +118,7 @@ def _with_app(app_key: str, callback: Callable[[Any], dict[str, Any]]) -> dict[s
     app = None
     try:
         _check_enabled()
-        app = _connect(APP_PROGIDS[key])
+        app = _connect(APP_PROGIDS[key], allow_launch)
         result = callback(app)
         _check_enabled()
         if not isinstance(result, dict):
@@ -331,7 +354,7 @@ def _validate_values_json(raw: Any) -> list[list[Any]]:
                 if len(value) > 1000 or "\x00" in value:
                     raise ValueError("Each Excel text value is limited to 1,000 characters and cannot contain null characters.")
                 if value.lstrip().startswith(("=", "+", "-", "@")):
-                    raise PermissionError("Excel formula-like text is blocked. Ozzy writes literal values only; formulas must be entered manually by the user.")
+                    raise PermissionError("Excel formula-like text is blocked in excel_write_range, which writes literal values only. Use excel_set_formula to enter a formula.")
                 if SENSITIVE_TEXT.search(value):
                     raise PermissionError("Excel text that appears to contain a password, key, token, or private secret is blocked.")
                 output_row.append(value)
@@ -435,8 +458,38 @@ def _office_list_running_apps(_args: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "applications": running, "count": len(running), "message": "Already-running Microsoft Office applications checked. Ozzy did not launch any application."}
 
 
-def _word_inspect(_args: dict[str, Any], app) -> dict[str, Any]:
+def _word_outline(doc, first: Any) -> tuple[list[dict[str, Any]], int]:
+    """Numbered, non-empty paragraph previews so formatting can target exact paragraphs."""
+    count = int(doc.Paragraphs.Count)
+    if first is None:
+        start = max(1, count - 39)
+    elif isinstance(first, bool) or not isinstance(first, int) or not 1 <= first <= max(count, 1):
+        raise ValueError(f"from_paragraph must be a whole number from 1 to {max(count, 1)}.")
+    else:
+        start = first
+    outline: list[dict[str, Any]] = []
+    for index in range(start, count + 1):
+        if len(outline) >= 40:
+            break
+        try:
+            paragraph = doc.Paragraphs.Item(index)
+            text = _redact_sensitive_text(str(paragraph.Range.Text or "").strip())[:80]
+        except Exception:
+            break  # The outline is a convenience; never let it fail the whole inspection.
+        if not text:
+            continue
+        style = ""
+        try:
+            style = str(paragraph.Style.NameLocal)[:40]
+        except Exception:
+            pass
+        outline.append({"index": index, "style": style, "text": text})
+    return outline, start
+
+
+def _word_inspect(args: dict[str, Any], app) -> dict[str, Any]:
     doc = _active_word(app)
+    outline, outline_start = _word_outline(doc, args.get("from_paragraph"))
     # Read only the bounded tail rather than materializing an entire large document.
     content_end = int(doc.Content.End)
     text_range = doc.Range(max(0, content_end - 6000), content_end)
@@ -450,7 +503,8 @@ def _word_inspect(_args: dict[str, Any], app) -> dict[str, Any]:
         "ok": True, "application": "word", "document_name": str(doc.Name)[:180],
         "paragraph_count": int(doc.Paragraphs.Count), "page_count": pages,
         "character_count": max(0, content_end - 1), "text_excerpt": text[-6000:],
-        "message": "Active Word document inspected. Text is an excerpt of the document's end; no content was changed.",
+        "outline_from_paragraph": outline_start, "outline": outline,
+        "message": "Active Word document inspected. Text is an excerpt of the document's end and the outline lists up to 40 numbered paragraphs; no content was changed.",
     }
 
 
@@ -496,13 +550,19 @@ def _excel_inspect_range(args: dict[str, Any], app) -> dict[str, Any]:
     if count > MAX_RANGE_CELLS:
         raise ValueError(f"Inspection is limited to {MAX_RANGE_CELLS} cells per action; the requested range has {count} cells.")
     values = _excel_values(selected.Value2, rows, columns)
+    include_formulas = args.get("include_formulas") is True
     sheet_names = [str(workbook.Worksheets.Item(i).Name)[:31] for i in range(1, int(workbook.Worksheets.Count) + 1)]
-    return {
+    result = {
         "ok": True, "application": "excel", "workbook_name": str(workbook.Name)[:180],
         "sheet_name": str(sheet.Name)[:31], "worksheet_names": sheet_names,
         "range": address, "rows": rows, "columns": columns, "values": values,
         "message": f"Read {count} cell value(s) from {sheet.Name}!{address}. Formulas were not returned.",
     }
+    if include_formulas:
+        # Formula text of untrusted workbooks is data only; strings are redacted and bounded like values.
+        result["formulas"] = _excel_values(selected.Formula, rows, columns)
+        result["message"] = f"Read {count} cell value(s) and formula text from {sheet.Name}!{address}."
+    return result
 
 
 def _excel_write_range(args: dict[str, Any], app) -> dict[str, Any]:
@@ -549,18 +609,30 @@ def _excel_add_worksheet(args: dict[str, Any], app) -> dict[str, Any]:
     }
 
 
-def _powerpoint_inspect(_args: dict[str, Any], app) -> dict[str, Any]:
+def _powerpoint_inspect(args: dict[str, Any], app) -> dict[str, Any]:
     presentation = _active_presentation(app)
     total = int(presentation.Slides.Count)
     slides = []
     total_chars = 0
-    first_slide = max(1, total - 29)  # Include the newest slide so workflow verification can see additions.
-    for index in range(first_slide, total + 1):
+    requested_first = args.get("from_slide")
+    if requested_first is None:
+        first_slide = max(1, total - 29)  # Include the newest slide so workflow verification can see additions.
+    elif isinstance(requested_first, bool) or not isinstance(requested_first, int) or not 1 <= requested_first <= max(total, 1):
+        raise ValueError(f"from_slide must be a whole number from 1 to {max(total, 1)}.")
+    else:
+        first_slide = requested_first
+    for index in range(first_slide, min(total, first_slide + 29) + 1):
         slide = presentation.Slides.Item(index)
         texts = []
+        shape_list = []
         shape_count = min(int(slide.Shapes.Count), 80)
         for shape_index in range(1, shape_count + 1):
             shape = slide.Shapes.Item(shape_index)
+            if shape_index <= 15:
+                try:
+                    shape_list.append({"index": shape_index, "name": str(shape.Name)[:40], "has_text": bool(shape.HasTextFrame and shape.TextFrame.HasText)})
+                except Exception:
+                    shape_list.append({"index": shape_index, "name": "", "has_text": False})
             try:
                 if bool(shape.HasTextFrame) and bool(shape.TextFrame.HasText):
                     value = str(shape.TextFrame.TextRange.Text or "").strip()
@@ -573,7 +645,7 @@ def _powerpoint_inspect(_args: dict[str, Any], app) -> dict[str, Any]:
                 continue
             if total_chars >= 9000:
                 break
-        slides.append({"slide_number": index, "text": "\n".join(texts)[:1200]})
+        slides.append({"slide_number": index, "text": "\n".join(texts)[:1200], "shapes": shape_list})
         if total_chars >= 9000:
             break
     return {
@@ -694,4 +766,11 @@ def execute_action(name: str, args: dict[str, Any] | None = None) -> dict[str, A
         return _with_app("powerpoint", lambda app: _powerpoint_inspect(payload, app))
     if name == "powerpoint_add_slide":
         return _with_app("powerpoint", lambda app: _powerpoint_add_slide(payload, app))
+    # Stage 8 modules import this one, so they are loaded lazily to avoid a circular import.
+    import office_documents
+    import office_styling
+    if name in office_styling.ACTIONS:
+        return office_styling.execute(name, payload)
+    if name in office_documents.ACTIONS:
+        return office_documents.execute(name, payload)
     raise ValueError(f"Unsupported Office automation action: {name}")

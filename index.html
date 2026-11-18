@@ -1348,6 +1348,46 @@
           }
           break;
         }
+        case 'office_open_approval': {
+          const requestId = String(message.requestId || '');
+          const applicationLabel = String(message.application_label || 'Microsoft Office').slice(0, 40);
+          const filePath = String(message.file_path || '').slice(0, 500);
+          const payload = {
+            application: String(message.application || '').slice(0, 20),
+            application_label: applicationLabel,
+            file_path: filePath,
+            size_bytes: Number(message.size_bytes) || 0,
+            read_only: message.read_only === true,
+            internet_download: message.internet_download === true,
+            will_start_app: message.will_start_app === true,
+          };
+          const extra = [
+            payload.will_start_app ? `${applicationLabel} will be started.` : '',
+            payload.internet_download ? 'Downloaded from the internet: opens read-only.' : (payload.read_only ? 'Opens read-only.' : ''),
+          ].filter(Boolean).join(' ');
+          const prompt = `Open this file in ${applicationLabel}?\n\n${filePath}\n\nMacros are disabled and Ozzy will not save over the file. ${extra}`;
+          setStatus('Approval required: open an Office file. Review the confirmation dialog.', 'live');
+          showComputerAction(`Approval required: open ${filePath} in ${applicationLabel}`, true);
+          let approved = false;
+          try {
+            if (window.ozzyDesktop && typeof window.ozzyDesktop.confirmOfficeOpen === 'function') {
+              approved = await window.ozzyDesktop.confirmOfficeOpen(payload);
+            } else {
+              approved = window.confirm(prompt);
+            }
+          } catch (error) {
+            console.error('Could not display the Office open approval dialog:', error);
+            setStatus('The Office open approval dialog could not be displayed. Nothing was opened.', 'error');
+            approved = false;
+          }
+          const sent = sendJson({ type: 'office_open_decision', requestId, approved: Boolean(approved) });
+          if (sent) {
+            setStatus(approved ? 'Opening the Office file was approved.' : 'Opening the Office file was cancelled.', 'live');
+          } else {
+            setStatus('Could not send the Office open decision. Reconnect Ozzy; no approval was recorded.', 'error');
+          }
+          break;
+        }
         case 'workflow_template_approval': {
           const action = String(message.action || 'save');
           const name = String(message.name || 'Unnamed workflow').slice(0, 64);
