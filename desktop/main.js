@@ -76,6 +76,36 @@ ipcMain.handle('ozzy:office:confirm-save', async (event, payload = {}) => {
   return result.response === 0;
 });
 
+// OZZY_STAGE8_OFFICE_OPEN_APPROVAL
+ipcMain.handle('ozzy:office:confirm-open', async (event, payload = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
+  const labels = { word: 'Microsoft Word', excel: 'Microsoft Excel', powerpoint: 'Microsoft PowerPoint' };
+  const application = labels[payload && payload.application] || 'Microsoft Office';
+  const filePath = payload && typeof payload.file_path === 'string' ? payload.file_path.trim().slice(0, 500) : '';
+  if (!filePath || !path.isAbsolute(filePath)) return false;
+  const sizeBytes = Number(payload && payload.size_bytes);
+  const sizeText = Number.isFinite(sizeBytes) && sizeBytes >= 0
+    ? (sizeBytes >= 1048576 ? `${(sizeBytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`)
+    : 'unknown size';
+  const notes = [
+    'Macros are disabled while Ozzy opens the file. Ozzy will not save over it.',
+    payload && payload.will_start_app ? `${application} is not running, so Ozzy will start it.` : '',
+    payload && payload.internet_download ? 'This file was downloaded from the internet, so it opens read-only.' : '',
+    payload && payload.read_only && !payload.internet_download ? 'It will open read-only.' : '',
+  ].filter(Boolean).join('\n');
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: 'Confirm opening an Office file',
+    message: `Open this file in ${application}?`,
+    detail: `${filePath}\n(${sizeText})\n\n${notes}`,
+    buttons: ['Open file', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  return result.response === 0;
+});
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function localOrigin(value) {

@@ -130,7 +130,7 @@ The automated tests cover SQLite save, duplicate prevention, keyword lookup, sec
 
 ## 11. Office productivity (Stage 7)
 
-Stage 7 adds Microsoft Word, Excel and PowerPoint automation through `pywin32` COM. Office desktop applications must already be running; Ozzy attaches to the active application and does not launch apps or open arbitrary documents.
+Stage 7 adds Microsoft Word, Excel and PowerPoint automation through `pywin32` COM. Ozzy attaches to the active Office application; Stage 8 (below) adds formatting, formulas and an approval-gated way to open existing files.
 
 - Word: inspect a bounded excerpt, append text, and add Heading 1–3. Editing is restricted to macro-free `.docx` files.
 - Excel: inspect up to 200 cell values (bounded response), write a rectangular matrix of literal values (formula-like strings are blocked), and add a new worksheet. Excel events are temporarily suspended around edits and restored to their previous state. This is application-wide for the brief operation, so other open Excel workbooks in that instance are affected temporarily.
@@ -139,6 +139,16 @@ Stage 7 adds Microsoft Word, Excel and PowerPoint automation through `pywin32` C
 - Office editing actions are available to Stage 5 workflows and Stage 6 saved recipes with the same bounded verification rules. `office_save_new` requires interactive confirmation and is excluded from reusable workflows.
 
 Install/update requirements with `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`. See `INSTALL_STAGE7.md` for testing, limitations and rollback.
+
+### Stage 8: formatting, formulas and opening existing documents
+
+- **Word** `word_format_text`: font, size, color, bold/italic/underline/strikethrough, highlight, alignment, line spacing, spacing before/after and built-in styles, for the last paragraph, a numbered paragraph, your current selection, matching text, or the whole document. `word_inspect` now returns a numbered paragraph outline.
+- **Excel** `excel_format_range`: fonts, colors, fills, number formats, alignment, wrap, borders, column width/row height and autofit. `excel_set_formula` enters one validated formula over a range (relative references fill like Excel's fill-down). Only common math, statistics, logic, text, date, lookup and financial functions on the same workbook are allowed; named ranges, external workbooks, `INDIRECT`, `OFFSET`, `HYPERLINK`, web and system functions are blocked. `excel_inspect_range` can return formula text with `include_formulas`.
+- **PowerPoint** `powerpoint_format_text` (title, body, all text or a numbered shape; text styling and shape fill) and `powerpoint_set_slide_background`. `powerpoint_inspect` now lists shape numbers.
+- **Open existing documents** `office_open_document` opens one existing `.docx`, `.xlsx` or `.pptx` from Desktop, Documents, Downloads or OneDrive after a separate native approval dialog that shows the full path. Macros are force-disabled, links are not updated, password-protected or non-zip files are refused, internet-downloaded files open read-only, and Ozzy starts the Office app only after you approve. `office_list_open_documents` and `office_activate_document` switch between open documents by name.
+- Ozzy never saves over an opened file. Edits stay in memory until you save, or `office_save_new` creates a separate new file. Formatting, formula and switching actions are available to Stage 5 workflows and Stage 6 recipes; `office_open_document` and `office_save_new` are not.
+
+See `INSTALL_STAGE8.md` for testing and limitations.
 
 ## Privacy and security notes
 
