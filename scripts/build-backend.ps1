@@ -58,6 +58,7 @@ Write-Host 'Building one-file Ozzy backend. This may take several minutes on the
   --hidden-import windows_workflows `
   --hidden-import safe_file_actions `
   --hidden-import memory_service `
+  --hidden-import scheduler_service `
   --hidden-import computer_control `
   server.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed. Check the output above.' }

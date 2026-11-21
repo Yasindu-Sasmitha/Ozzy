@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('ozzyDesktop', Object.freeze({
   confirmWorkflowApproval: (payload) => ipcRenderer.invoke('ozzy:workflow-library:confirm', payload),
   confirmOfficeSave: (payload) => ipcRenderer.invoke('ozzy:office:confirm-save', payload),
   confirmOfficeOpen: (payload) => ipcRenderer.invoke('ozzy:office:confirm-open', payload),
+  notify: (payload) => ipcRenderer.invoke('ozzy:notify', payload),
 }));
