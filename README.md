@@ -242,3 +242,11 @@ Recipes are stored on this device only. Saving and deleting require an extra con
 
 See `INSTALL_STAGE6.md` for installation, tests and rollback instructions. No new Python dependencies are required.
 
+
+## 12. Reminders, timers and real clock (Stage 9)
+
+Ozzy now knows the real local date and time, and can set one-off or recurring reminders and timers by voice ("every weekday at 8 read me my deadlines"). When something is due he shows a toast and desktop notification and, because you allowed it, speaks first. Manage everything from Advanced Options → Reminders. Data is stored in the same local SQLite database.
+
+Scheduled announcements run with a tool allowlist (time and memory lookups only), so reminder text can never trigger PC, browser, Office or file actions. Reminders only fire while Ozzy is running.
+
+See `INSTALL_STAGE9.md` for the test checklist and limitations. No new Python dependencies are required.

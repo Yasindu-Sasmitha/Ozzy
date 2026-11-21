@@ -30,6 +30,7 @@ import workflow_engine
 import workflow_library
 import office_automation
 import office_documents
+import scheduler_service
 
 # PyInstaller extracts bundled static files to _MEIPASS. In development, use this file's folder.
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)).resolve()
@@ -1002,14 +1003,134 @@ OFFICE_TOOLS = [
 ]
 
 
+SCHEDULER_TOOLS = [
+    types.Tool(
+        function_declarations=[
+            types.FunctionDeclaration(
+                name="get_current_time",
+                description="Get the user's real current local date, time and time zone. Call this whenever the exact time or date matters; never guess it.",
+                parameters={"type": "OBJECT", "properties": {}},
+            ),
+            types.FunctionDeclaration(
+                name="reminder_create",
+                description=(
+                    "Create a reminder (one-off or recurring) that fires as a notification and, because the user allowed it, Ozzy speaks first when it is due. "
+                    "One-off: give `at` (local YYYY-MM-DDTHH:MM) or `in_minutes`. Recurring: set repeat plus time_of_day (24-hour HH:MM). "
+                    "Resolve relative phrases against get_current_time/the CURRENT CLOCK first. Reminders only fire while the Ozzy app is running."
+                ),
+                parameters={
+                    "type": "OBJECT",
+                    "properties": {
+                        "title": {"type": "STRING", "description": "Short reminder title, e.g. 'Read my deadlines'."},
+                        "note": {"type": "STRING", "description": "Optional extra detail, e.g. 'read me my deadlines'. Never include secrets."},
+                        "at": {"type": "STRING", "description": "Local date-time YYYY-MM-DDTHH:MM for a one-off reminder."},
+                        "in_minutes": {"type": "NUMBER", "description": "Minutes from now for a one-off reminder."},
+                        "repeat": {
+                            "type": "STRING",
+                            "enum": ["none", "daily", "weekdays", "weekends", "weekly", "monthly", "every"],
+                            "description": "Repeat pattern. 'every' repeats at a fixed interval using every_minutes.",
+                        },
+                        "time_of_day": {"type": "STRING", "description": "24-hour HH:MM for daily/weekdays/weekends/weekly/monthly."},
+                        "days": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "For weekly: days such as mon, tue, wed, thu, fri, sat, sun."},
+                        "day_of_month": {"type": "INTEGER", "description": "For monthly: day 1-31 (short months use their last day)."},
+                        "every_minutes": {"type": "INTEGER", "description": "For repeat=every: minutes between reminders, minimum 5."},
+                    },
+                    "required": ["title"],
+                },
+            ),
+            types.FunctionDeclaration(
+                name="timer_start",
+                description="Start a countdown timer (up to 24 hours). Ozzy announces it when it ends while the app is running.",
+                parameters={
+                    "type": "OBJECT",
+                    "properties": {
+                        "minutes": {"type": "NUMBER", "description": "Timer length in minutes."},
+                        "seconds": {"type": "NUMBER", "description": "Extra or alternative length in seconds."},
+                        "label": {"type": "STRING", "description": "Optional short label such as 'Tea'."},
+                    },
+                },
+            ),
+            types.FunctionDeclaration(
+                name="reminder_list",
+                description="List the user's active reminders and timers with their next due times.",
+                parameters={"type": "OBJECT", "properties": {}},
+            ),
+            types.FunctionDeclaration(
+                name="reminder_cancel",
+                description="Cancel an active reminder or timer by id, or by words in its title/note. If several match, ask the user which one.",
+                parameters={
+                    "type": "OBJECT",
+                    "properties": {
+                        "reminder_id": {"type": "INTEGER", "description": "Reminder id from reminder_list."},
+                        "query": {"type": "STRING", "description": "Words from the title or note."},
+                    },
+                },
+            ),
+            types.FunctionDeclaration(
+                name="reminder_snooze",
+                description="Snooze the reminder that just went off (or a given event) for some minutes when the user asks for more time.",
+                parameters={
+                    "type": "OBJECT",
+                    "properties": {
+                        "minutes": {"type": "NUMBER", "description": "Minutes to snooze, 1-720. Default 10."},
+                        "event_id": {"type": "INTEGER", "description": "Optional event id; defaults to the most recent one."},
+                    },
+                },
+            ),
+            types.FunctionDeclaration(
+                name="reminder_settings",
+                description="Read or change reminder behaviour. speak_first lets Ozzy talk first when something is due; notifications controls desktop notifications. Call with no arguments to read them.",
+                parameters={
+                    "type": "OBJECT",
+                    "properties": {
+                        "speak_first": {"type": "BOOLEAN", "description": "Allow Ozzy to speak first when a reminder is due."},
+                        "notifications": {"type": "BOOLEAN", "description": "Show desktop notifications for reminders."},
+                    },
+                },
+            ),
+        ]
+    )
+]
+
+
 LIVE_CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
     "speech_config": {"voice_config": {"prebuilt_voice_config": {"voice_name": VOICE_NAME}}},
     "input_audio_transcription": {},
     "output_audio_transcription": {},
-    "tools": MEMORY_TOOLS + PC_CONTROL_TOOLS + BROWSER_CONTROL_TOOLS + WINDOWS_AUTOMATION_TOOLS + WORKFLOW_TOOLS + WORKFLOW_LIBRARY_TOOLS + OFFICE_TOOLS,
+    "tools": MEMORY_TOOLS + PC_CONTROL_TOOLS + BROWSER_CONTROL_TOOLS + WINDOWS_AUTOMATION_TOOLS + WORKFLOW_TOOLS + WORKFLOW_LIBRARY_TOOLS + OFFICE_TOOLS + SCHEDULER_TOOLS,
 }
+
+
+def make_live_config() -> dict:
+    """Build a per-session Live config so the system instruction carries the real local time."""
+    config = dict(LIVE_CONFIG)
+    config["system_instruction"] = {"parts": [{"text": scheduler_service.system_instruction(SYSTEM_INSTRUCTION)}]}
+    return config
+
+
+REMINDER_HUB = scheduler_service.ReminderHub()
+
+
+class SessionHandle:
+    """What the reminder hub needs from one connected Live session."""
+
+    def __init__(self, websocket, input_queue, blockers):
+        self.websocket = websocket
+        self.input_queue = input_queue
+        self.activity = scheduler_service.SessionActivity()
+        self._blockers = blockers
+
+    def blockers(self) -> int:
+        return int(self._blockers())
+
+    async def notify(self, event: dict) -> None:
+        await send_to_browser(self.websocket, "reminder_due", event=event)
+
+    async def deliver(self, event: dict) -> None:
+        self.activity.begin_scheduled_turn()
+        await self.input_queue.put(("text", scheduler_service.build_event_prompt(event)))
 
 
 def json_message(message_type: str, **fields) -> str:
@@ -1049,13 +1170,19 @@ async def browser_bridge(websocket):
     pending_workflow_requests: dict[str, dict] = {}
     pending_office_save_requests: dict[str, asyncio.Future] = {}
     computer_control_enabled = False
+    session_handle = SessionHandle(
+        websocket,
+        input_queue,
+        lambda: len(pending_memory_requests) + len(pending_workflow_requests) + len(pending_office_save_requests),
+    )
+    activity = session_handle.activity
     browser_controller = browser_control.BrowserController(DATA_DIR / "browser-profile")
     windows_automation.stop_actions()
     office_automation.stop_actions()
 
     try:
         client = genai.Client(api_key=API_KEY)
-        async with client.aio.live.connect(model=MODEL_ID, config=LIVE_CONFIG) as session:
+        async with client.aio.live.connect(model=MODEL_ID, config=make_live_config()) as session:
             await send_to_browser(
                 websocket,
                 "status",
@@ -1063,6 +1190,7 @@ async def browser_bridge(websocket):
             )
             await send_to_browser(websocket, "computer_control_status", enabled=False, message="PC Control is off.")
             log.info("Gemini Live session started (%s)", MODEL_ID)
+            REMINDER_HUB.register(session_handle)
 
             async def send_inputs_to_gemini():
                 while True:
@@ -1107,7 +1235,16 @@ async def browser_bridge(websocket):
                 def respond(result: dict):
                     return input_queue.put(("tool_response", {"id": call_id, "name": name, "result": result}))
 
+                activity.note_model_output()
                 try:
+                    if not activity.tool_allowed(name):
+                        log.warning("Blocked tool %s during a scheduled reminder announcement", name)
+                        await respond({
+                            "ok": False,
+                            "denied": True,
+                            "message": "That tool is not available while a scheduled reminder is being announced. Finish the announcement; the user can ask for it afterwards.",
+                        })
+                        return
                     if name in OFFICE_TOOL_NAMES:
                         if not computer_control_enabled:
                             await respond({"ok": False, "denied": True, "message": "Office automation is disabled. Enable PC Control in Ozzy's Advanced Options first."})
@@ -1433,6 +1570,11 @@ async def browser_bridge(websocket):
                             failure = {"ok": False, "message": str(action_error)[:300]}
                             await send_to_browser(websocket, "computer_action", action=name, ok=False, message=failure["message"])
                             await respond(failure)
+                    elif name in scheduler_service.TOOL_NAMES:
+                        result = await asyncio.to_thread(scheduler_service.run_tool, name, dict(args))
+                        await respond(result)
+                        if result.get("changed"):
+                            await send_to_browser(websocket, "reminders_changed")
                     elif name == "list_memories":
                         memories = await asyncio.to_thread(memory_service.list_memories, 100)
                         await respond({"memories": memories, "count": len(memories)})
@@ -1509,9 +1651,11 @@ async def browser_bridge(websocket):
                             continue
                         user_transcription = getattr(content, "input_transcription", None)
                         if user_transcription and getattr(user_transcription, "text", None):
+                            activity.note_user_activity()
                             await send_to_browser(websocket, "transcript", speaker="you", text=user_transcription.text)
                         assistant_transcription = getattr(content, "output_transcription", None)
                         if assistant_transcription and getattr(assistant_transcription, "text", None):
+                            activity.note_model_output()
                             await send_to_browser(websocket, "transcript", speaker="gemini", text=assistant_transcription.text)
 
                         model_turn = getattr(content, "model_turn", None)
@@ -1520,6 +1664,7 @@ async def browser_bridge(websocket):
                                 inline_data = getattr(part, "inline_data", None)
                                 audio_data = getattr(inline_data, "data", None) if inline_data else None
                                 if audio_data:
+                                    activity.note_model_output()
                                     audio_bytes = base64.b64decode(audio_data) if isinstance(audio_data, str) else bytes(audio_data)
                                     await send_to_browser(
                                         websocket,
@@ -1530,6 +1675,7 @@ async def browser_bridge(websocket):
                         if getattr(content, "interrupted", False):
                             await send_to_browser(websocket, "interrupted")
                         if getattr(content, "turn_complete", False):
+                            activity.note_turn_complete()
                             await send_to_browser(websocket, "turn_complete")
                     if not received_any_message:
                         await asyncio.sleep(0.1)
@@ -1568,6 +1714,7 @@ async def browser_bridge(websocket):
                     elif message_type == "text":
                         text = str(message.get("text", "")).strip()
                         if text:
+                            activity.note_user_activity()
                             await input_queue.put(("text", text))
                     elif message_type == "workflow_template_decision":
                         request_id = str(message.get("requestId", ""))
@@ -1685,6 +1832,7 @@ async def browser_bridge(websocket):
             message="Could not connect to Gemini Live. Check the API key, model access, network, and terminal. Details: " + str(exc)[:500],
         )
     finally:
+        REMINDER_HUB.unregister(session_handle)
         computer_control.stop_current_action()
         browser_controller.stop_actions()
         windows_automation.stop_actions()
@@ -1720,10 +1868,90 @@ class OzzyRequestHandler(SimpleHTTPRequestHandler):
                 log.exception("Could not list memories")
                 self._send_json(500, {"error": str(exc)[:200]})
             return
+        if path == "/api/reminders":
+            try:
+                self._send_json(200, {
+                    "reminders": scheduler_service.list_reminders(),
+                    "settings": scheduler_service.get_settings(),
+                    "now": scheduler_service.time_info(),
+                })
+            except Exception as exc:
+                log.exception("Could not list reminders")
+                self._send_json(500, {"error": str(exc)[:200]})
+            return
+        if path == "/api/reminders/events":
+            try:
+                self._send_json(200, {
+                    "events": scheduler_service.pending_events(),
+                    "settings": scheduler_service.get_settings(),
+                    "liveSessions": REMINDER_HUB.session_count,
+                    "now": scheduler_service.time_info(),
+                })
+            except Exception as exc:
+                log.exception("Could not read reminder events")
+                self._send_json(500, {"error": str(exc)[:200]})
+            return
         # This app only needs one static HTML file. Avoid accidentally serving .env/Python files.
         if path in ("/", "/index.html"):
             self.path = "/index.html"
             super().do_GET()
+            return
+        self._send_json(404, {"error": "Not found"})
+
+    def _is_trusted_post(self) -> bool:
+        """State-changing requests must come from Ozzy's own page, never from another website."""
+        if self.headers.get("X-Ozzy-Request") != "1":
+            return False
+        origin = self.headers.get("Origin")
+        return origin in (None, "", f"http://{HTTP_HOST}:{HTTP_PORT}", f"http://localhost:{HTTP_PORT}")
+
+    def _read_json_body(self) -> dict:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 4096:
+            return {}
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    def do_POST(self):  # noqa: N802
+        path = unquote(urlparse(self.path).path)
+        if not self._is_trusted_post():
+            self._send_json(403, {"error": "Forbidden"})
+            return
+        body = self._read_json_body()
+        try:
+            if path == "/api/reminders/settings":
+                settings = scheduler_service.update_settings(body.get("speak_first"), body.get("notifications"))
+                self._send_json(200, {"ok": True, "settings": settings})
+                return
+            match = re.fullmatch(r"/api/reminders/events/(\d+)/(shown|speech|dismiss|snooze)", path)
+            if match:
+                event_id, action = int(match.group(1)), match.group(2)
+                if action == "shown":
+                    self._send_json(200, {"ok": scheduler_service.mark_shown(event_id)})
+                elif action == "speech":
+                    # True only for the single caller that wins the right to announce this event.
+                    self._send_json(200, {"ok": True, "granted": scheduler_service.claim_speech(event_id)})
+                elif action == "dismiss":
+                    self._send_json(200, {"ok": scheduler_service.dismiss_event(event_id)})
+                else:
+                    self._send_json(200, scheduler_service.snooze(event_id, body.get("minutes", 10)))
+                return
+            match = re.fullmatch(r"/api/reminders/(\d+)/cancel", path)
+            if match:
+                self._send_json(200, scheduler_service.cancel_reminder(int(match.group(1))))
+                return
+        except scheduler_service.SchedulerError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        except Exception as exc:
+            log.exception("Reminder API request failed")
+            self._send_json(500, {"ok": False, "error": str(exc)[:200]})
             return
         self._send_json(404, {"error": "Not found"})
 
@@ -1757,6 +1985,7 @@ def start_http_server() -> ThreadingHTTPServer:
 async def main():
     memory_service.initialize()
     workflow_library.initialize()
+    scheduler_service.initialize()
     if not API_KEY:
         log.warning("No Gemini API key found. The app will start, but chat is disabled until .env is configured.")
 
@@ -1765,6 +1994,7 @@ async def main():
     log.info("Ozzy WebSocket: ws://%s:%s", WS_HOST, WS_PORT)
     log.info("SQLite memory DB: %s", memory_service.database_path())
     log.info("Press Ctrl+C to stop Ozzy.")
+    reminder_task = asyncio.create_task(REMINDER_HUB.run(), name="reminder-scheduler")
     try:
         async with websockets.serve(
             browser_bridge,
@@ -1777,6 +2007,8 @@ async def main():
         ):
             await asyncio.Future()
     finally:
+        reminder_task.cancel()
+        await asyncio.gather(reminder_task, return_exceptions=True)
         http_server.shutdown()
         http_server.server_close()
 

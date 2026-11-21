@@ -1,10 +1,14 @@
-const { app, BrowserWindow, dialog, session, desktopCapturer, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, session, desktopCapturer, ipcMain, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 
 app.setName('Ozzy');
+// Windows needs an AppUserModelID for native toast notifications to show the app's name.
+if (process.platform === 'win32') app.setAppUserModelId('com.yasindu.ozzy');
+// Reminders may need Ozzy to speak first without a click, so let the local UI play audio unprompted.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 const userDataDir = path.join(app.getPath('appData'), 'Ozzy');
 app.setPath('userData', userDataDir);
 
@@ -16,6 +20,24 @@ let backendProcess = null;
 let logStream = null;
 let quitting = false;
 const pendingCapturePickers = new Map();
+
+// OZZY_STAGE9_NOTIFICATIONS
+ipcMain.handle('ozzy:notify', (event, payload = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
+  if (!Notification.isSupported()) return false;
+  const clip = (value, limit) => (typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, limit) : '');
+  const title = clip(payload && payload.title, 120) || 'Ozzy';
+  const body = clip(payload && payload.body, 300);
+  const notification = new Notification({ title, body });
+  notification.on('click', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+  notification.show();
+  return true;
+});
 
 // OZZY_STAGE6_NATIVE_APPROVAL_DIALOG
 ipcMain.handle('ozzy:workflow-library:confirm', async (event, payload = {}) => {
@@ -322,6 +344,8 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       webSecurity: true,
+      // Keep reminder timers and the speak-first poller running when the window is minimised.
+      backgroundThrottling: false,
     },
   });
 

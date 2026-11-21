@@ -190,6 +190,18 @@
     .memory-date { color: #94a3b8; font-size: 10px; }
     .memory-content { font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
     .memory-empty { border: 1px dashed #cbd5e1; border-radius: 12px; padding: 18px; text-align: center; color: var(--muted); font-size: 12px; }
+    .toast-stack { position: fixed; z-index: 1200; right: 16px; top: 16px; display: grid; gap: 10px; width: min(360px, calc(100vw - 32px)); }
+    .toast { background: #0f172a; color: #f8fafc; border-radius: 14px; padding: 13px 14px; box-shadow: 0 14px 44px #02061766; border: 1px solid #334155; animation: toast-in .25s ease-out; }
+    .toast-title { font-size: 13px; font-weight: 850; overflow-wrap: anywhere; }
+    .toast-body { margin-top: 3px; font-size: 12px; line-height: 1.45; color: #cbd5e1; overflow-wrap: anywhere; }
+    .toast-meta { margin-top: 3px; font-size: 10px; color: #94a3b8; }
+    .toast-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .toast-actions button { padding: 6px 10px; border-radius: 9px; font-size: 11px; border: 1px solid #475569; background: #1e293b; color: #f8fafc; cursor: pointer; }
+    .toast-actions button:hover { background: #334155; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .reminder-settings { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 12px; font-size: 12px; color: var(--ink); }
+    .reminder-settings label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+    .reminder-when { color: var(--muted); font-size: 11px; margin-top: 3px; }
     .small-button { padding: 7px 9px; border-radius: 9px; font-size: 11px; flex: 0 0 auto; }
     .modal-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 18px; background: #0f172a99; backdrop-filter: blur(5px); }
     .modal-card { width: min(540px, 100%); max-height: min(80vh, 700px); overflow: auto; background: #fff; border-radius: 20px; padding: 22px; box-shadow: 0 24px 90px #02061755; }
@@ -272,6 +284,23 @@
       <div id="memory-list" class="memory-list"><div class="memory-empty">Loading memories…</div></div>
     </section>
 
+    <section id="reminders-panel" class="memory-panel" hidden aria-label="Reminders and timers">
+      <div class="memory-heading">
+        <div class="memory-title">⏰ Reminders &amp; timers</div>
+        <div class="buttons">
+          <button id="refresh-reminders-btn" class="secondary small-button">Refresh</button>
+          <button id="close-reminders-panel-btn" class="secondary small-button">Close</button>
+        </div>
+      </div>
+      <p id="reminders-clock" class="memory-description">Ozzy's clock: loading…</p>
+      <div class="reminder-settings">
+        <label><input id="speak-first-toggle" type="checkbox" checked> Let Ozzy speak first when something is due</label>
+        <label><input id="notifications-toggle" type="checkbox" checked> Desktop notifications</label>
+      </div>
+      <p class="memory-description">Ask by voice, e.g. “every weekday at 8 read me my deadlines” or “set a timer for 10 minutes”. Reminders only fire while Ozzy is running.</p>
+      <div id="reminders-list" class="memory-list"><div class="memory-empty">Loading reminders…</div></div>
+    </section>
+
     <section class="visual-panel" aria-label="Camera and screen share">
       <div class="visual-heading">
         <div>
@@ -318,6 +347,7 @@
         <button id="start-btn" class="primary">Connect &amp; Talk</button>
         <button id="stop-btn" class="danger" disabled>Disconnect</button>
         <button id="memory-btn" class="secondary">Memories</button>
+        <button id="reminders-btn" class="secondary">Reminders</button>
         <button id="clear-btn" class="secondary">Clear chat</button>
       </div>
       <form id="text-form" class="text-form">
@@ -343,6 +373,7 @@
     </div>
   </div>
 
+<div id="toast-stack" class="toast-stack" aria-live="assertive" aria-atomic="false"></div>
 <script>
 (() => {
   'use strict';
@@ -376,6 +407,15 @@
   const memoryList = document.getElementById('memory-list');
   const refreshMemoriesBtn = document.getElementById('refresh-memories-btn');
   const closeMemoryPanelBtn = document.getElementById('close-memory-panel-btn');
+  const remindersPanel = document.getElementById('reminders-panel');
+  const remindersList = document.getElementById('reminders-list');
+  const remindersClock = document.getElementById('reminders-clock');
+  const remindersBtn = document.getElementById('reminders-btn');
+  const refreshRemindersBtn = document.getElementById('refresh-reminders-btn');
+  const closeRemindersPanelBtn = document.getElementById('close-reminders-panel-btn');
+  const speakFirstToggle = document.getElementById('speak-first-toggle');
+  const notificationsToggle = document.getElementById('notifications-toggle');
+  const toastStack = document.getElementById('toast-stack');
   const memoryModal = document.getElementById('memory-modal');
   const memoryModalTitle = document.getElementById('memory-modal-title');
   const memoryModalDescription = document.getElementById('memory-modal-description');
@@ -1235,8 +1275,13 @@
     pcControlStopBtn.disabled = !connected || !computerControlEnabled;
   }
 
-  async function connect() {
+  async function connect(options = {}) {
+    const wake = Boolean(options && options.wake === true);
+    if (!wake && wakeSession) await endWakeSession();
     if (isConnecting || (ws && ws.readyState === WebSocket.OPEN)) return;
+    wakeSession = wake;
+    wakeSpoke = false;
+    clearWakeCloseTimer();
     isConnecting = true;
     isConnected = false;
     userRequestedDisconnect = false;
@@ -1260,8 +1305,19 @@
       return;
     }
 
+    const thisSocket = ws;
     ws.onopen = async () => {
       try {
+        if (wake) {
+          setStatus('Ozzy has a reminder…');
+          await startPlaybackOnly();
+          isConnecting = false;
+          isConnected = true;
+          updateButtons(true);
+          clearWakeCloseTimer();
+          wakeCloseTimer = window.setTimeout(() => { if (wakeSession) endWakeSession(); }, WAKE_MAX_MS);
+          return;
+        }
         setStatus('Allow microphone access in your browser…');
         await startMicrophone();
         isConnecting = false;
@@ -1286,10 +1342,18 @@
 
       switch (message.type) {
         case 'status':
+          if (wakeSession) break;
           setStatus(message.message || 'Connected.', 'live');
           break;
         case 'audio':
+          if (wakeSession) { wakeSpoke = true; clearWakeCloseTimer(); }
           playOutputChunk(message.data);
+          break;
+        case 'reminder_due':
+          showReminderToast(message.event);
+          break;
+        case 'reminders_changed':
+          if (!remindersPanel.hidden) loadReminders();
           break;
         case 'transcript': {
           addMessage(message.speaker, message.text);
@@ -1312,6 +1376,11 @@
           setStatus('Gemini response interrupted — listening to you.', 'live');
           break;
         case 'turn_complete':
+          if (wakeSession) {
+            // The announcement is finished; close the mic-less session shortly after the audio ends.
+            if (wakeSpoke) { clearWakeCloseTimer(); wakeCloseTimer = window.setTimeout(() => { if (wakeSession) endWakeSession(); }, 6000); }
+            break;
+          }
           setStatus('Ready — you can keep talking.', 'live');
           noteUserActivity();
           break;
@@ -1479,6 +1548,13 @@
     };
 
     ws.onclose = async () => {
+      if (ws !== thisSocket) return;
+      if (wake) {
+        if (!wakeSpoke) wakeCooldownUntil = Date.now() + 60000;
+        lastError = '';
+      }
+      clearWakeCloseTimer();
+      wakeSession = false;
       isConnecting = false;
       isConnected = false;
       if (speechQuietTimer !== null) { clearTimeout(speechQuietTimer); speechQuietTimer = null; }
@@ -1494,6 +1570,7 @@
   }
 
   async function disconnect() {
+    clearWakeCloseTimer();
     if (computerControlEnabled) setComputerControlEnabled(false, true, 'PC Control disabled because the session is disconnecting.');
     userRequestedDisconnect = true;
     isConnecting = false;
@@ -1512,6 +1589,244 @@
       setStatus('Disconnected.');
       setRobotState('idle');
     }
+  }
+
+  // ===== Stage 9: reminders, toasts and speaking first =====
+  const REMINDER_POLL_MS = 5000;
+  const WAKE_MAX_MS = 90000;
+  const WAKE_FALLBACK_MS = 30000;
+  const shownReminderEvents = new Set();
+  let reminderSettings = { speak_first: true, notifications: true };
+  let wakeSession = false;
+  let wakeSpoke = false;
+  let wakeStartedAt = 0;
+  let wakeCooldownUntil = 0;
+  let wakeCloseTimer = null;
+  let reminderPollBusy = false;
+
+  async function reminderApi(path, body) {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Ozzy-Request': '1' },
+      body: JSON.stringify(body || {})
+    });
+    return response.json();
+  }
+
+  function playChime() {
+    try {
+      const context = new AudioContext();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, context.currentTime);
+      oscillator.frequency.setValueAtTime(1175, context.currentTime + 0.14);
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.15, context.currentTime + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.5);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.55);
+      oscillator.onended = () => { try { context.close(); } catch (_) {} };
+    } catch (_) {}
+  }
+
+  function reminderLabel(event) {
+    return (event.kind === 'timer' ? '⏲️ Timer' : '⏰ Reminder') + (event.late ? ' (missed)' : '');
+  }
+
+  function removeToast(toast) {
+    if (toast && toast.parentNode) toast.parentNode.removeChild(toast);
+  }
+
+  function showReminderToast(event) {
+    if (!event || shownReminderEvents.has(event.id)) return;
+    shownReminderEvents.add(event.id);
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.setAttribute('role', 'alert');
+    const title = document.createElement('div');
+    title.className = 'toast-title';
+    title.textContent = reminderLabel(event) + ': ' + String(event.title || '');
+    toast.appendChild(title);
+    if (event.note) {
+      const body = document.createElement('div');
+      body.className = 'toast-body';
+      body.textContent = String(event.note);
+      toast.appendChild(body);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'toast-meta';
+    meta.textContent = 'Due ' + String(event.due_local || '');
+    toast.appendChild(meta);
+    const actions = document.createElement('div');
+    actions.className = 'toast-actions';
+    const snoozeButton = document.createElement('button');
+    snoozeButton.textContent = 'Snooze 10 min';
+    snoozeButton.addEventListener('click', async () => {
+      try { await reminderApi('/api/reminders/events/' + event.id + '/snooze', { minutes: 10 }); } catch (_) {}
+      removeToast(toast);
+      if (!remindersPanel.hidden) loadReminders();
+    });
+    const dismissButton = document.createElement('button');
+    dismissButton.textContent = 'Dismiss';
+    dismissButton.addEventListener('click', async () => {
+      try { await reminderApi('/api/reminders/events/' + event.id + '/dismiss'); } catch (_) {}
+      removeToast(toast);
+    });
+    actions.append(snoozeButton, dismissButton);
+    toast.appendChild(actions);
+    toastStack.appendChild(toast);
+    while (toastStack.children.length > 5) removeToast(toastStack.firstChild);
+    reminderApi('/api/reminders/events/' + event.id + '/shown').catch(() => {});
+
+    if (reminderSettings.notifications) {
+      const text = String(event.note || event.due_local || '');
+      const heading = reminderLabel(event) + ': ' + String(event.title || '');
+      try {
+        if (window.ozzyDesktop && typeof window.ozzyDesktop.notify === 'function') {
+          window.ozzyDesktop.notify({ title: heading, body: text });
+        } else if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification(heading, { body: text });
+        } else if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission().catch(() => {});
+        }
+      } catch (_) {}
+    }
+    if (!reminderSettings.speak_first || event.late) playChime();
+    if (!remindersPanel.hidden) loadReminders();
+  }
+
+  async function localSpeak(event) {
+    // Last-resort voice when no Gemini session can announce the event.
+    let granted = false;
+    try { granted = (await reminderApi('/api/reminders/events/' + event.id + '/speech')).granted === true; } catch (_) {}
+    if (!granted || !('speechSynthesis' in window)) return;
+    const prefix = event.kind === 'timer' ? 'Timer: ' : 'Reminder: ';
+    const utterance = new SpeechSynthesisUtterance(prefix + String(event.title || '') + (event.note ? '. ' + String(event.note) : ''));
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function startPlaybackOnly() {
+    playbackAudioContext = new AudioContext();
+    await playbackAudioContext.resume();
+    if (playbackAudioContext.state !== 'running') throw new Error('Audio playback is blocked until you interact with the page.');
+  }
+
+  function clearWakeCloseTimer() {
+    if (wakeCloseTimer !== null) { clearTimeout(wakeCloseTimer); wakeCloseTimer = null; }
+  }
+
+  async function endWakeSession() {
+    clearWakeCloseTimer();
+    wakeSession = false;
+    const socket = ws;
+    if (!socket || socket.readyState >= WebSocket.CLOSING) return;
+    const closed = new Promise((resolve) => socket.addEventListener('close', resolve, { once: true }));
+    await disconnect();
+    await Promise.race([closed, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  function startWakeSession() {
+    if (wakeSession || isConnecting || (ws && ws.readyState <= WebSocket.OPEN)) return;
+    wakeStartedAt = Date.now();
+    connect({ wake: true });
+  }
+
+  async function pollReminders() {
+    if (reminderPollBusy) return;
+    reminderPollBusy = true;
+    try {
+      const response = await fetch('/api/reminders/events', { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      reminderSettings = Object.assign(reminderSettings, data.settings || {});
+      const events = Array.isArray(data.events) ? data.events : [];
+      for (const event of events) if (!event.shown) showReminderToast(event);
+      const waiting = events.filter((event) => !event.spoken && !event.late);
+      if (!reminderSettings.speak_first || !waiting.length) return;
+      const sessionOpen = ws && ws.readyState === WebSocket.OPEN;
+      if (sessionOpen && !wakeSession) return;                    // the backend announces it in the live session
+      if (isConnecting && !wakeSession) return;                    // the user is starting a normal session
+      if (wakeSession) {
+        if (Date.now() - wakeStartedAt > WAKE_FALLBACK_MS) {
+          for (const event of waiting) await localSpeak(event);
+          endWakeSession();
+        }
+        return;
+      }
+      if ((data.liveSessions || 0) > 0) return;                    // another Ozzy client is connected and will speak
+      if (Date.now() < wakeCooldownUntil) {
+        for (const event of waiting) await localSpeak(event);
+        return;
+      }
+      startWakeSession();
+    } catch (_) {
+      // Backend may be restarting; try again on the next poll.
+    } finally {
+      reminderPollBusy = false;
+    }
+  }
+
+  async function loadReminders() {
+    remindersList.replaceChildren();
+    try {
+      const response = await fetch('/api/reminders', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load reminders');
+      reminderSettings = Object.assign(reminderSettings, data.settings || {});
+      speakFirstToggle.checked = Boolean(reminderSettings.speak_first);
+      notificationsToggle.checked = Boolean(reminderSettings.notifications);
+      const now = data.now || {};
+      remindersClock.textContent = "Ozzy's clock: " + (now.date || '') + ' · ' + (now.time_12h || '') + ' (' + (now.timezone || '') + ', UTC' + (now.utc_offset || '') + ')';
+      const reminders = Array.isArray(data.reminders) ? data.reminders : [];
+      if (!reminders.length) {
+        const empty = document.createElement('div');
+        empty.className = 'memory-empty';
+        empty.textContent = 'Nothing scheduled. Try “remind me in 20 minutes to stretch”.';
+        remindersList.appendChild(empty);
+        return;
+      }
+      for (const reminder of reminders) {
+        const item = document.createElement('article');
+        item.className = 'memory-item';
+        const main = document.createElement('div');
+        main.className = 'memory-item-main';
+        const content = document.createElement('div');
+        content.className = 'memory-content';
+        content.textContent = (reminder.kind === 'timer' ? '⏲️ ' : '⏰ ') + reminder.title + (reminder.note ? ' — ' + reminder.note : '');
+        const when = document.createElement('div');
+        when.className = 'reminder-when';
+        when.textContent = reminder.next_due_local + ' · ' + reminder.repeat;
+        main.append(content, when);
+        const cancel = document.createElement('button');
+        cancel.className = 'secondary small-button';
+        cancel.textContent = 'Cancel';
+        cancel.addEventListener('click', async () => {
+          try { await reminderApi('/api/reminders/' + reminder.id + '/cancel'); } catch (_) {}
+          loadReminders();
+        });
+        item.append(main, cancel);
+        remindersList.appendChild(item);
+      }
+    } catch (error) {
+      const failed = document.createElement('div');
+      failed.className = 'memory-empty';
+      failed.textContent = 'Could not load reminders: ' + (error.message || error);
+      remindersList.appendChild(failed);
+    }
+  }
+
+  async function saveReminderSettings() {
+    try {
+      const data = await reminderApi('/api/reminders/settings', {
+        speak_first: speakFirstToggle.checked,
+        notifications: notificationsToggle.checked
+      });
+      if (data.settings) reminderSettings = Object.assign(reminderSettings, data.settings);
+    } catch (_) {}
   }
 
   textForm.addEventListener('submit', (event) => {
@@ -1549,6 +1864,16 @@
   });
   refreshMemoriesBtn.addEventListener('click', loadMemories);
   closeMemoryPanelBtn.addEventListener('click', () => { memoryPanel.hidden = true; });
+  remindersBtn.addEventListener('click', async () => {
+    remindersPanel.hidden = !remindersPanel.hidden;
+    if (!remindersPanel.hidden) await loadReminders();
+  });
+  refreshRemindersBtn.addEventListener('click', loadReminders);
+  closeRemindersPanelBtn.addEventListener('click', () => { remindersPanel.hidden = true; });
+  speakFirstToggle.addEventListener('change', saveReminderSettings);
+  notificationsToggle.addEventListener('change', saveReminderSettings);
+  pollReminders();
+  window.setInterval(pollReminders, REMINDER_POLL_MS);
   memoryApproveBtn.addEventListener('click', () => decideMemoryApproval(true));
   memoryRejectBtn.addEventListener('click', () => decideMemoryApproval(false));
   memoryModal.addEventListener('click', (event) => {
